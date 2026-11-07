@@ -141,6 +141,9 @@ input:focus{border-color:var(--gold)}
 #modal:empty{display:none}
 .card .mid.long{font-size:calc(var(--w)*.34)}
 .card.xl{--w:150px}
+.card.sm2{--w:48px}
+.card.sm2 .cn{display:none}
+.three-hand .card{cursor:pointer}
 .unyo-zone{position:fixed; left:12px; bottom:28px; z-index:45; display:flex; flex-direction:column; gap:10px; align-items:flex-start}
 .fly{position:fixed; left:0; top:0; z-index:80; pointer-events:none; margin:0 !important; --w:54px}
 .cutin{position:fixed; inset:0; z-index:85; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; pointer-events:none;
@@ -168,6 +171,16 @@ input:focus{border-color:var(--gold)}
 @keyframes tin{from{transform:translateY(-10px); opacity:0}}
 .log{position:fixed; right:0; top:0; bottom:0; width:min(320px,86vw); background:rgba(5,15,10,.95); z-index:40; padding:14px; overflow:auto; font-size:13px; line-height:1.6; border-left:1px solid rgba(255,255,255,.15)}
 .log div.b{color:var(--gold); font-weight:700}
+.rules{width:min(560px,96vw); font-size:13.5px}
+.rsec{margin:10px 0 14px}
+.rsec h3{font-size:14px; color:var(--gold); margin:0 0 4px; border-bottom:1px solid rgba(255,255,255,.15); padding-bottom:3px}
+.rsec ul{margin:0; padding-left:18px}
+.rsec li{margin:2px 0}
+.rtable{width:100%; border-collapse:collapse}
+.rtable td{padding:6px 6px; border-bottom:1px solid rgba(255,255,255,.1); vertical-align:middle}
+.rtable td:first-child{width:56px}
+.rtable td:nth-child(2){width:110px; white-space:nowrap}
+.rcount{font-size:11px; opacity:.75; font-weight:500}
 .debugbar{background:rgba(255,122,162,.18); color:#ffd0de; font-size:12px; text-align:center; padding:3px}
 @media (max-width:600px){
   .card{--w:54px} .card.lg{--w:76px} .card.sm{--w:28px}
@@ -189,7 +202,7 @@ input:focus{border-color:var(--gold)}
 // =====================================================================
 const COLORS = ['red', 'blue', 'yellow', 'green'];
 const COLOR_JA = { red: '赤', blue: '青', yellow: '黄', green: '緑', rainbow: 'レインボー' };
-const SYM_JA = { skip: 'スキップ', reverse: 'リバース', draw2: 'ドロー2', draw4: 'ドロー4', draw6: 'ドロー6', draw10: 'ドロー10', wild: 'ワイルド', drawwild: 'ドローワイルド' };
+const SYM_JA = { skip: 'スキップ', reverse: 'リバース', draw2: 'ドロー2', draw4: 'ドロー4', draw6: 'ドロー6', draw10: 'ドロー10', wild: 'ワイルド', drawwild: 'ドローワイルド', discard: 'ディスカード' };
 const DRAW_VAL = { draw2: 2, draw4: 4, draw6: 6, draw10: 10 }; // 重ねられるドロー系カード
 function cardName(c) {
   if (c.color === 'rainbow') return SYM_JA[c.sym];
@@ -207,16 +220,16 @@ function buildDeck() {
   const add = (color, sym) => d.push({ id: id++, color, sym });
   for (const c of COLORS) {
     for (let n = 0; n <= 9; n++) { add(c, String(n)); add(c, String(n)); } // 0〜9 各2枚
-    for (const s of ['skip', 'reverse', 'draw2']) { add(c, s); add(c, s); } // スキップ・リバース・ドロー2 各2枚
+    for (const s of ['skip', 'reverse', 'draw2', 'discard']) { add(c, s); add(c, s); } // スキップ・リバース・ドロー2・ディスカード 各2枚
   }
   const rb = (sym, n) => { for (let i = 0; i < n; i++) add('rainbow', sym); };
   rb('draw4', 2); rb('wild', 2); rb('draw6', 4); rb('draw10', 2); rb('drawwild', 2); // レインボー
-  return d; // 合計 116枚
+  return d; // 合計 124枚
 }
 
 class Game {
   constructor(players, opts = {}) {
-    this.players = players.map(p => ({ id: p.id, name: p.name, hand: [], connected: true }));
+    this.players = players.map(p => ({ id: p.id, name: p.name, hand: [], connected: true, burst: false }));
     this.totals = opts.totals || {};
     this.round = opts.round || 1;
     this.log = []; this.seq = 0;
@@ -242,18 +255,19 @@ class Game {
     this.pending = 0;          // ドロー系の累積枚数
     this.pendingMin = 0;       // 重ねるのに必要な最小のドロー値
     this.dw = null;            // ドローワイルド進行中 {by, color, count}
-    this.phase = 'play';       // play | color | seven | over
+    this.phase = 'play';       // play | color | seven | three | dwcolor | dwdraw | over
     this.forced = null;        // パスで引いたカードが出せる場合、そのカードID
     this.unyoDeclared = false; // 現在の手番プレイヤーがUNYO宣言済みか
     this.unyoTarget = null;    // UNYO忘れで指摘可能なプレイヤーID
-    this.winner = null; this.roundScore = 0;
+    this.winner = null; this.roundScore = 0; this.voided = false; this.endReason = '';
     this.addLog(`第${this.round}ラウンド開始！最初の場のカードは「${cardName(first)}」`, true);
     this.addLog(`${this.cur().name} さんの番です`);
   }
   cur() { return this.players[this.turn]; }
   byId(id) { return this.players.find(p => p.id === id); }
   top() { return this.discard[this.discard.length - 1]; }
-  connectedCount() { return this.players.filter(p => p.connected).length; }
+  isActive(p) { return p.connected && !p.burst; }
+  activeCount() { return this.players.filter(p => this.isActive(p)).length; }
   canPlay(c) {
     if (this.pending > 0) return (DRAW_VAL[c.sym] || 0) >= this.pendingMin; // 同じか大きいドローだけ重ねられる
     if (c.color === 'rainbow') return true;           // レインボーはいつでも
@@ -271,28 +285,36 @@ class Game {
   drawCards(p, n) {
     const got = [];
     for (let i = 0; i < n; i++) {
-      if (this.deck.length === 0 && !this.refill()) break;
+      if (this.deck.length === 0 && !this.refill()) { this.voidGame(); break; }
       const c = this.deck.pop(); p.hand.push(c); got.push(c);
     }
-    if (got.length < n) this.addLog(`カードが足りず ${got.length} 枚しか引けませんでした`);
     if (got.length) this.emit('draw', { pid: p.id, n: got.length });
     return got;
   }
+  voidGame() {
+    if (this.phase === 'over') return;
+    this.phase = 'over'; this.winner = null; this.voided = true; this.roundScore = 0;
+    this.pending = 0; this.pendingMin = 0; this.dw = null; this.forced = null; this.unyoTarget = null;
+    this.endReason = '山札が無くなったため無効試合です';
+    this.addLog('山札が完全に無くなりました。このラウンドは無効試合です', true);
+    this.emit('void', {});
+  }
   nextIdx(from, steps = 1) {
     const n = this.players.length; let i = from;
-    if (this.connectedCount() === 0) return i;
+    if (this.activeCount() === 0) return i;
     for (let s = 0; s < steps; s++) {
-      do { i = (i + this.dir + n) % n; } while (!this.players[i].connected);
+      do { i = (i + this.dir + n) % n; } while (!this.isActive(this.players[i]));
     }
     return i;
   }
   advance(steps = 1) {
+    if (this.phase === 'over') return;
     this.turn = this.nextIdx(this.turn, steps);
     this.unyoDeclared = false; this.forced = null; this.phase = 'play';
     this.addLog(`${this.cur().name} さんの番です`);
   }
   rotateHands() {
-    const idxs = this.players.map((_, i) => i).filter(i => this.players[i].connected);
+    const idxs = this.players.map((_, i) => i).filter(i => this.isActive(this.players[i]));
     const m = idxs.length, hands = idxs.map(i => this.players[i].hand), nh = new Array(m);
     const moves = [];
     for (let k = 0; k < m; k++) {
@@ -304,11 +326,43 @@ class Game {
     this.emit('rotate', { moves });
     this.addLog('全員が次の人へ手札を渡しました！', true);
   }
-  finish(p) {
+  finish(p, reason = '') {
     this.phase = 'over'; this.winner = p.id; this.pending = 0; this.pendingMin = 0; this.unyoTarget = null; this.dw = null;
-    this.roundScore = this.players.filter(q => q.id !== p.id).reduce((s, q) => s + q.hand.length * 10, 0);
+    this.endReason = reason;
+    // 他プレイヤーの手札 × 10pt、バーストしたプレイヤーは 300pt
+    this.roundScore = this.players.filter(q => q.id !== p.id).reduce((s, q) => s + (q.burst ? 300 : q.hand.length * 10), 0);
     this.totals[p.id] = (this.totals[p.id] || 0) + this.roundScore;
-    this.addLog(`🎉 ${p.name} さんが上がり！ ${this.roundScore}pt 獲得`, true);
+    this.addLog(`🎉 ${p.name} さんが${reason ? '勝利' : '上がり'}！ ${this.roundScore}pt 獲得`, true);
+  }
+  // 手札が25枚を超えたらバースト（脱落）。手札はシャッフルして山札の下へ
+  checkBursts() {
+    if (this.phase === 'over') return;
+    let curBurst = false;
+    for (const q of this.players) {
+      if (q.burst || q.hand.length <= 25) continue;
+      q.burst = true;
+      const n = q.hand.length;
+      this.deck = shuffle(q.hand).concat(this.deck); // 配列の先頭 = 山札の下
+      q.hand = [];
+      if (this.unyoTarget === q.id) this.unyoTarget = null;
+      this.addLog(`💥 ${q.name} さんは手札が ${n} 枚になりバースト！ このラウンドから脱落します`, true);
+      this.emit('burst', { pid: q.id, n });
+      if (this.cur().id === q.id) curBurst = true;
+    }
+    const alive = this.players.filter(q => this.isActive(q));
+    if (alive.length === 1 && this.players.some(q => q.burst)) { this.finish(alive[0], '他の全員がバーストしたため'); return; }
+    if (alive.length < 2) { this.endShort(); return; }
+    if (curBurst) {
+      if (this.dw) { this.color = this.dw.color || this.color; this.dw = null; }
+      this.forced = null; this.pending = 0; this.pendingMin = 0;
+      this.advance(1);
+    }
+  }
+  endShort() {
+    if (this.phase === 'over') return;
+    this.phase = 'over'; this.winner = null; this.dw = null;
+    this.endReason = 'プレイヤーが足りないため終了しました';
+    this.addLog('プレイヤーが足りないため、このラウンドを終了します', true);
   }
   setDisconnected(pid) {
     const p = this.byId(pid); if (!p || !p.connected) return;
@@ -316,11 +370,7 @@ class Game {
     this.addLog(`${p.name} さんが切断しました（以降の手番は飛ばされます）`, true);
     if (this.phase === 'over') return;
     if (this.unyoTarget === pid) this.unyoTarget = null;
-    if (this.connectedCount() < 2) {
-      this.phase = 'over'; this.winner = null;
-      this.addLog('プレイヤーが足りないため、このラウンドを終了します', true);
-      return;
-    }
+    if (this.activeCount() < 2) { this.endShort(); return; }
     if (this.cur().id === pid) {
       if (this.phase === 'color') {
         this.color = COLORS[Math.floor(Math.random() * 4)];
@@ -337,14 +387,22 @@ class Game {
 
   // 操作を検証して適用する。エラー時はメッセージ文字列を返す
   handle(pid, a) {
+    const err = this.apply(pid, a);
+    if (err === null) this.checkBursts();
+    return err;
+  }
+  apply(pid, a) {
     if (this.phase === 'over') return 'このラウンドは終了しています';
     const p = this.byId(pid);
     if (!p || !p.connected) return 'このラウンドの参加者ではありません';
+    if (p.burst) return 'バーストしたため、このラウンドには参加できません';
     const isCur = this.cur().id === pid;
+    const others = () => this.players.filter(q => q.id !== pid && this.isActive(q));
     switch (a && a.t) {
       case 'unyo': {
         if (!isCur || this.phase !== 'play') return 'あなたの番ではありません';
         if (p.hand.length !== 2) return 'UNYOは手札が2枚のときに宣言できます';
+        if (!p.hand.some(c => this.canPlay(c) && (this.forced === null || c.id === this.forced))) return '出せるカードがないのでUNYO宣言はできません';
         if (!this.unyoDeclared) { this.unyoDeclared = true; this.addLog(`${p.name}「UNYO！」`, true); }
         return null;
       }
@@ -353,8 +411,8 @@ class Game {
         if (this.unyoTarget === pid) return '自分は指摘できません';
         const t = this.byId(this.unyoTarget); this.unyoTarget = null;
         if (!t) return null;
-        this.drawCards(t, 2);
         this.addLog(`${p.name} さんが ${t.name} さんの「UNYO忘れ」を指摘！ ${t.name} さんは2枚ドロー`, true);
+        this.drawCards(t, 2);
         return null;
       }
       case 'play': {
@@ -364,14 +422,22 @@ class Game {
         if (idx < 0) return 'そのカードは持っていません';
         const c = p.hand[idx];
         if (this.forced !== null && c.id !== this.forced) return '引いたカードを出さなければいけません';
-        if (!this.canPlay(c)) return this.pending > 0 ? 'ドロー4を重ねるか、カードを引いてください' : 'そのカードは出せません';
+        if (!this.canPlay(c)) return this.pending > 0 ? `ドロー${this.pendingMin}以上を重ねるか、カードを引いてください` : 'そのカードは出せません';
         const before = p.hand.length;
         this.unyoTarget = null;               // 次の人がカードを出したら UNYO忘れ は時効
-        p.hand.splice(idx, 1); this.discard.push(c); this.forced = null;
-        this.addLog(`${p.name} さんが「${cardName(c)}」を出しました`);
+        p.hand.splice(idx, 1); this.forced = null;
+        // ディスカード：同じ色のカードを手札から全部捨てる（場の一番上はディスカード）
+        let dumped = [];
+        if (c.sym === 'discard') {
+          dumped = p.hand.filter(x => x.color === c.color);
+          p.hand = p.hand.filter(x => x.color !== c.color);
+          this.discard.push(...dumped);
+        }
+        this.discard.push(c);
+        this.addLog(`${p.name} さんが「${cardName(c)}」を出しました` + (c.sym === 'discard' ? `（同じ色を ${dumped.length} 枚捨てた）` : ''));
         const dv = DRAW_VAL[c.sym] || 0;
-        this.emit('play', { by: pid, card: c, pending: dv ? this.pending + dv : 0 });
-        if (before === 2 && !this.unyoDeclared) this.unyoTarget = pid; // UNYO宣言忘れ
+        this.emit('play', { by: pid, card: c, pending: dv ? this.pending + dv : 0, dumped: dumped.length });
+        if (before === 2 && p.hand.length === 1 && !this.unyoDeclared) this.unyoTarget = pid; // UNYO宣言忘れ
         this.unyoDeclared = false;
         if (p.hand.length === 0) { this.finish(p); return null; }
         if (c.color !== 'rainbow') this.color = c.color;
@@ -391,8 +457,10 @@ class Game {
           case 'wild':
             this.phase = 'color'; break;
           case '7':
-            if (this.players.some(q => q.id !== pid && q.connected)) this.phase = 'seven';
-            else this.advance(1);
+            if (others().length) this.phase = 'seven'; else this.advance(1);
+            break;
+          case '3':
+            if (others().length) this.phase = 'three'; else this.advance(1);
             break;
           case '0':
             this.rotateHands(); this.advance(1); break;
@@ -400,8 +468,15 @@ class Game {
             this.addLog(`${this.players[this.nextIdx(this.turn, 1)].name} さんはスキップ！`, true);
             this.advance(2); break;
           case 'reverse':
-            this.dir *= -1; this.addLog('順番が逆回りになりました', true);
-            this.advance(1); break;
+            this.dir *= -1;
+            if (this.activeCount() === 2) {
+              this.addLog(`2人なのでリバースはスキップ扱い！ ${this.players[this.nextIdx(this.turn, 1)].name} さんはスキップ`, true);
+              this.advance(2);
+            } else {
+              this.addLog('順番が逆回りになりました', true);
+              this.advance(1);
+            }
+            break;
           default:
             this.advance(1);
         }
@@ -418,10 +493,24 @@ class Game {
       case 'seven': {
         if (!isCur || this.phase !== 'seven') return '交換相手を選ぶタイミングではありません';
         const t = this.byId(a.target);
-        if (!t || t.id === pid || !t.connected) return '交換相手を選んでください（自分は選べません）';
+        if (!t || t.id === pid || !this.isActive(t)) return '交換相手を選んでください（自分は選べません）';
         [p.hand, t.hand] = [t.hand, p.hand];
         this.emit('swap', { a: p.id, b: t.id });
         this.addLog(`${p.name} さんと ${t.name} さんが手札を交換！`, true);
+        this.advance(1);
+        return null;
+      }
+      case 'three': {
+        if (!isCur || this.phase !== 'three') return 'カードを渡すタイミングではありません';
+        const t = this.byId(a.target);
+        if (!t || t.id === pid || !this.isActive(t)) return '渡す相手を選んでください（自分は選べません）';
+        const i = p.hand.findIndex(c => c.id === a.cardId);
+        if (i < 0) return '渡すカードを選んでください';
+        const [c] = p.hand.splice(i, 1);
+        t.hand.push(c);
+        this.emit('give', { from: p.id, to: t.id });
+        this.addLog(`${p.name} さんが ${t.name} さんにカードを1枚渡しました`, true);
+        if (p.hand.length === 0) { this.finish(p); return null; }
         this.advance(1);
         return null;
       }
@@ -431,16 +520,15 @@ class Game {
         if (this.forced !== null) return '引いたカードを出してください';
         if (this.pending > 0) {
           const n = this.pending; this.pending = 0; this.pendingMin = 0; this.unyoTarget = null;
-          this.drawCards(p, n);
           this.addLog(`${p.name} さんは ${n} 枚ドロー`, true);
+          this.drawCards(p, n);
           this.advance(1);
           return null;
         }
-        if (p.hand.some(c => this.canPlay(c))) return '出せるカードがあるのでパスできません';
         this.unyoTarget = null;
         this.addLog(`${p.name} さんはパス（1枚ドロー）`);
         const [c] = this.drawCards(p, 1);
-        if (c && this.canPlay(c)) {
+        if (c && this.canPlay(c) && p.hand.length <= 25) {
           this.forced = c.id;
           this.addLog(`引いたカードが出せるので、${p.name} さんはそれを出さなければいけません`);
         } else this.advance(1);
@@ -456,12 +544,8 @@ class Game {
       case 'dwdraw': {
         if (!isCur || this.phase !== 'dwdraw') return 'めくるタイミングではありません';
         const [c] = this.drawCards(p, 1);
+        if (!c) return null; // 山札切れ → 無効試合
         this.dw.count++;
-        if (!c) {
-          this.addLog('めくれるカードが無いので、ドローワイルドを終了します', true);
-          this.color = this.dw.color; this.dw = null; this.unyoTarget = null; this.advance(1);
-          return null;
-        }
         if (c.color === this.dw.color || c.color === 'rainbow') {
           p.hand.splice(p.hand.indexOf(c), 1); this.discard.push(c);
           this.color = this.dw.color;
@@ -476,14 +560,14 @@ class Game {
   }
 
   // 各プレイヤーに送る画面用データ（allHands はデバッグ表示用）
-  view(pid) {
+  view(pid, withAllHands = false) {
     const me = this.byId(pid), cur = this.cur();
     const myTurn = me && cur.id === pid && this.phase === 'play';
     return {
       round: this.round,
-      players: this.players.map(p => ({ id: p.id, name: p.name, count: p.hand.length, connected: p.connected })),
+      players: this.players.map(p => ({ id: p.id, name: p.name, count: p.hand.length, connected: p.connected, burst: p.burst })),
       hand: me ? me.hand : [],
-      allHands: Object.fromEntries(this.players.map(p => [p.id, p.hand])),
+      allHands: withAllHands ? Object.fromEntries(this.players.map(p => [p.id, p.hand])) : null,
       top: this.top(), color: this.color, dir: this.dir, turnId: cur.id,
       pending: this.pending, pendingMin: this.pendingMin, phase: this.phase, forced: this.forced,
       dw: this.dw ? { ...this.dw } : null, events: this.events.slice(-30), eseq: this.eseq,
@@ -491,6 +575,7 @@ class Game {
       deckCount: this.deck.length, discardCount: this.discard.length,
       log: this.log.slice(-50), seq: this.seq,
       winner: this.winner, roundScore: this.roundScore, totals: { ...this.totals },
+      voided: this.voided, endReason: this.endReason,
       playable: myTurn ? me.hand.filter(c => this.canPlay(c) && (this.forced === null || c.id === this.forced)).map(c => c.id) : [],
     };
   }
@@ -499,7 +584,7 @@ class Game {
 // =====================================================================
 
 // バージョン表記 AA.BB（AA=メイン, 開発中は00 / BB=ミニ, 更新ごとに+1）
-const VERSION = '00.04';
+const VERSION = '00.07';
 const APP_ID = 'unyo-card-game-p2p-v1';
 const TRYSTERO_URLS = {
   nostr: [
@@ -597,7 +682,7 @@ const S = {
   isHost: false, selfId: null, hostId: null, lobby: null, view: null,
   net: params.get('net') === 'torrent' ? 'torrent' : 'nostr',
   diag: { lib: '', relays: '', joinErr: '', peers: 0, since: 0 },
-  seenE: null, fxQueue: [], fxBusyUntil: 0,
+  seenE: null, fxQueue: [], fxBusyUntil: 0, threeCard: null, showRules: false,
   debug: false, showLog: false, status: '', error: '', hostLost: false, seenSeq: 0, seenRound: 0, A: null,
 };
 const H = { players: [], game: null, totals: {}, round: 1 }; // ホスト専用
@@ -708,7 +793,7 @@ function broadcastState() {
     if (p.id === S.selfId) continue;
     if (p.connected) S.A.st.send(g.view(p.id), p.id);
   }
-  setView(g.view(S.selfId)); S.screen = 'game';
+  setView(g.view(S.selfId, true)); S.screen = 'game'; // 手札の確認はホストだけ
   render();
 }
 function hostAct(pid, a) {
@@ -738,11 +823,12 @@ function setView(v) {
 }
 
 // ---------- 演出 ----------
-const FX_SYMS = new Set(['0', '7', 'skip', 'reverse', 'draw2', 'draw4', 'draw6', 'draw10', 'wild', 'drawwild']);
-const FX_LABEL = { '0': '手札まわし！', '7': '手札交換！', skip: 'スキップ！', reverse: 'リバース！', wild: 'ワイルド！', drawwild: 'ドローワイルド！' };
+const FX_SYMS = new Set(['0', '3', '7', 'discard', 'skip', 'reverse', 'draw2', 'draw4', 'draw6', 'draw10', 'wild', 'drawwild']);
+const FX_LABEL = { '0': '手札まわし！', '3': 'カードを渡す！', discard: 'ディスカード！', '7': '手札交換！', skip: 'スキップ！', reverse: 'リバース！', wild: 'ワイルド！', drawwild: 'ドローワイルド！' };
 function fxLabel(e) {
   const dv = DRAW_VAL[e.card.sym];
   if (dv) return [`ドロー${dv}！`, e.pending > dv ? `重ねて合計 +${e.pending}` : ''];
+  if (e.card.sym === 'discard') return [FX_LABEL.discard, `同じ色を ${e.dumped || 0} 枚捨てた`];
   return [FX_LABEL[e.card.sym], ''];
 }
 function playFx(list) {
@@ -763,6 +849,19 @@ function playFx(list) {
     } else if (e.type === 'rotate') {
       at(t, () => e.moves.forEach(m => flyBundle(m.from, m.to)));
       t += 900;
+    } else if (e.type === 'give') {
+      at(t, () => { const f = seatRect(e.from), to = seatRect(e.to); fly(f, to, { rot: 0, s0: .9, s1: .7, dur: 700 }); });
+      t += 750;
+    } else if (e.type === 'burst') {
+      at(t, () => {
+        cutin(null, 'バースト！', `${S.view ? playerName(S.view, e.pid) : ''} さん 手札 ${e.n} 枚で脱落`);
+        const f = seatRect(e.pid), to = document.getElementById('deck')?.getBoundingClientRect();
+        for (let i = 0; i < 6; i++) fly(f, to, { delay: 300 + i * 60, dx: (i - 2.5) * 10, rot: 90, s0: .8, s1: .6, dur: 650 });
+      });
+      t += 1100;
+    } else if (e.type === 'void') {
+      at(t, () => cutin(null, '無効試合', '山札が無くなりました'));
+      t += 1000;
     } else if (e.type === 'swap') {
       at(t, () => { flyBundle(e.a, e.b); flyBundle(e.b, e.a); });
       t += 900;
@@ -799,7 +898,7 @@ function flyBundle(fromId, toId) {
 }
 function cutin(card, text, sub) {
   const box = h('div', { class: 'cutin' },
-    h('div', { class: 'cutin-card' }, cardEl(card, { size: 'xl' })),
+    card && h('div', { class: 'cutin-card' }, cardEl(card, { size: 'xl' })),
     h('div', { class: 'cutin-text' }, text),
     sub && h('div', { class: 'cutin-sub' }, sub));
   document.body.append(box);
@@ -821,7 +920,7 @@ function h(tag, props, ...kids) {
   }
   return el;
 }
-const SYM_LABEL = { skip: '⊘', reverse: '⇄', draw2: '+2', draw4: '+4', draw6: '+6', draw10: '+10', wild: '★', drawwild: '+?' };
+const SYM_LABEL = { skip: '⊘', reverse: '⇄', draw2: '+2', draw4: '+4', draw6: '+6', draw10: '+10', wild: '★', drawwild: '+?', discard: '⇊' };
 function cardEl(c, o = {}) {
   const lab = SYM_LABEL[c.sym] ?? c.sym;
   const ul = c.sym === '6' || c.sym === '9';
@@ -936,7 +1035,7 @@ function renderGame() {
   for (let k = 1; k < n; k++) others.push(v.players[(myIdx + k + n) % n]); // 自分の次から順に
   const myTurn = v.turnId === me;
   const playable = new Set(v.playable);
-  const canDraw = myTurn && v.phase === 'play' && v.forced === null && (v.pending > 0 || v.playable.length === 0);
+  const canDraw = myTurn && v.phase === 'play' && v.forced === null; // 出せるカードがあってもパスできる
   const totals = v.totals || {};
 
   // 手番の並び
@@ -944,35 +1043,38 @@ function renderGame() {
   let i = v.players.findIndex(p => p.id === v.turnId);
   for (let k = 0; k < n; k++) {
     const p = v.players[i];
-    if (p.connected) order.push(p);
+    if (p.connected && !p.burst) order.push(p);
     i = (i + v.dir + n) % n;
   }
 
   // ステータス文
   let status = '';
   const curName = playerName(v, v.turnId);
-  if (v.phase === 'over') status = 'ラウンド終了';
+  const meP = v.players.find(p => p.id === me);
+  if (v.phase === 'over') status = v.voided ? '無効試合' : 'ラウンド終了';
+  else if (meP && meP.burst) status = `💥 バーストしました。このラウンドは観戦です（${curName} さんの番）`;
   else if (v.phase === 'color') status = myTurn ? '色を選んでください' : `${curName} さんが色を選んでいます…`;
   else if (v.phase === 'dwcolor') status = myTurn ? 'ドローワイルド！宣言する色を選んでください' : `${curName} さんが色を宣言しています…（ドローワイルド）`;
   else if (v.phase === 'dwdraw') status = myTurn
     ? `「${COLOR_JA[v.dw.color]}」かレインボーが出るまで、山札をめくってください（${v.dw.count}枚めくり済み）`
     : `${curName} さんが「${COLOR_JA[v.dw.color]}」が出るまでめくっています…（${v.dw.count}枚目）`;
+  else if (v.phase === 'three') status = myTurn ? '3：渡すカードと、渡す相手を選んでください' : `${curName} さんがカードを渡す相手を選んでいます…`;
   else if (v.phase === 'seven') status = myTurn ? '手札を交換する相手を選んでください' : `${curName} さんが交換相手を選んでいます…`;
   else if (myTurn) {
     if (v.forced !== null) status = '引いたカードが出せます！そのカードを出してください';
     else if (v.pending > 0) status = v.playable.length ? `ドロー${v.pendingMin}以上を重ねるか、${v.pending}枚引いてください` : `重ねられるドローカードがありません。${v.pending}枚引いてください`;
     else if (!v.playable.length) status = '出せるカードがありません。パスしてください';
-    else status = 'あなたの番です！カードを選んでください';
+    else status = 'あなたの番です！カードを出すか、パスしてください';
   } else status = `${curName} さんの番です`;
 
   const seat = p => {
-    const hand = v.allHands[p.id] || [];
-    const cards = S.debug
+    const hand = (v.allHands && v.allHands[p.id]) || [];
+    const cards = S.debug && S.isHost
       ? hand.map(c => cardEl(c, { size: 'sm' }))
       : Array.from({ length: Math.min(p.count, 14) }, () => backEl('sm'));
-    return h('div', { class: `seat ${p.id === v.turnId && v.phase !== 'over' ? 'turn' : ''} ${p.connected ? '' : 'off'}`, 'data-seat': p.id },
+    return h('div', { class: `seat ${p.id === v.turnId && v.phase !== 'over' ? 'turn' : ''} ${p.connected && !p.burst ? '' : 'off'}`, 'data-seat': p.id },
       h('div', { class: 'nm' },
-        h('span', {}, p.name, !p.connected && '（切断）'),
+        h('span', {}, p.name, !p.connected && '（切断）', p.burst && h('span', { class: 'mark' }, 'BURST')),
         h('span', { class: 'row', style: 'gap:4px' },
           p.id === v.turnId && v.unyoDeclared && h('span', { class: 'mark y' }, 'UNYO!'),
           p.id === v.unyoTarget && h('span', { class: 'mark' }, '宣言忘れ?'),
@@ -996,7 +1098,7 @@ function renderGame() {
   const zone = [];
   if (canDraw) actions.push(h('button', { class: 'btn primary', id: 'btn-draw', onclick: () => act({ t: 'draw' }) },
     v.pending > 0 ? `${v.pending}枚引く` : 'パス（1枚引く）'));
-  if (myTurn && v.phase === 'play' && v.hand.length === 2)
+  if (myTurn && v.phase === 'play' && v.hand.length === 2 && v.playable.length > 0)
     zone.push(v.unyoDeclared
       ? h('button', { class: 'btn', disabled: true }, 'UNYO宣言済み ✓')
       : h('button', { class: 'btn unyo', id: 'btn-unyo', onclick: () => act({ t: 'unyo' }) }, 'UNYO!'));
@@ -1009,11 +1111,12 @@ function renderGame() {
       h('span', { class: 'logo' }, 'UNYO'),
       h('span', { class: 'info' }, `部屋 ${S.room}　第${v.round}ラウンド${S.isHost ? '　（あなたが進行役）' : ''}`),
       h('span', { class: 'sp' }),
-      h('button', { class: `btn small ${S.debug ? 'on' : 'ghost'}`, id: 'btn-debug', onclick: () => { S.debug = !S.debug; render(); } },
+      S.isHost && h('button', { class: `btn small ${S.debug ? 'on' : 'ghost'}`, id: 'btn-debug', onclick: () => { S.debug = !S.debug; render(); } },
         S.debug ? '🐞 手札表示中' : '🐞 全員の手札を見る'),
-      h('button', { class: 'btn small ghost', onclick: () => { S.showLog = !S.showLog; render(); } }, 'ログ'),
+      h('button', { class: `btn small ${S.showRules ? 'on' : 'ghost'}`, id: 'btn-rules', onclick: () => { S.showRules = !S.showRules; S.showLog = false; render(); } }, 'ルール'),
+      h('button', { class: 'btn small ghost', id: 'btn-log', onclick: () => { S.showLog = !S.showLog; S.showRules = false; render(); } }, 'ログ'),
       h('button', { class: 'btn small ghost', onclick: leaveRoom }, '退出')),
-    S.debug && h('div', { class: 'debugbar' }, 'デバッグ表示中：他のプレイヤーの手札が表になっています'),
+    S.debug && S.isHost && h('div', { class: 'debugbar' }, 'デバッグ表示中：他のプレイヤーの手札が表になっています'),
     h('div', { class: 'opps' }, others.map(seat)),
     h('div', { class: 'table' },
       h('div', { class: 'piles' },
@@ -1045,7 +1148,79 @@ function renderGame() {
     S.showLog && h('div', { class: 'log' },
       h('div', { class: 'row', style: 'justify-content:space-between; margin-bottom:8px' }, h('b', {}, 'ゲームログ'),
         h('button', { class: 'btn small ghost', onclick: () => { S.showLog = false; render(); } }, '閉じる')),
-      v.log.slice().reverse().map(l => h('div', { class: l.big ? 'b' : '' }, l.text))));
+      v.log.slice().reverse().map(l => h('div', { class: l.big ? 'b' : '' }, l.text))),
+    S.showRules && renderRules());
+}
+
+// ---------- ルール説明パネル ----------
+const CARD_INFO = [
+  ['0', '全員が、次の順番の人へ手札をまるごと渡します。'],
+  ['1', '効果なし'], ['2', '効果なし'],
+  ['3', '好きな相手を1人選び、自分の手札から好きなカードを1枚渡します（自分は選べません）。'],
+  ['4', '効果なし'], ['5', '効果なし'], ['6', '効果なし'],
+  ['7', '相手を1人指名して、その人とすぐに手札を交換します（自分は選べません）。'],
+  ['8', '効果なし'], ['9', '効果なし'],
+  ['skip', '次の人の番を飛ばします。'],
+  ['reverse', '順番の向きが反対になります。2人で遊んでいるときは、相手の番を飛ばします。'],
+  ['draw2', '次の人は2枚引きます。ドロー2以上のドロー系カードを重ねて、次の人に回すこともできます。'],
+  ['discard', '手札にある同じ色のカードを全部捨てます。場の一番上はディスカードになります。これで手札が無くなればUNYO宣言は不要です。'],
+  ['wild', 'どんなカードの上にも出せます。出した人が次の色を選びます。'],
+  ['draw4', '次の人は4枚引きます。ドロー4以上を重ねられます。出した人が次の色を選びます。'],
+  ['draw6', '次の人は6枚引きます。ドロー6以上を重ねられます。出した人が次の色を選びます。'],
+  ['draw10', '次の人は10枚引きます。ドロー10を重ねられます。出した人が次の色を選びます。'],
+  ['drawwild', '次の人は色を1つ宣言し、山札を1枚ずつめくります。宣言した色かレインボーが出たら、そのカードを場に出して番が終わります（そのカードの効果は発動しません）。ほかのドロー系カードは重ねられません。'],
+];
+function deckCounts() {
+  const m = {};
+  for (const c of buildDeck()) {
+    const k = m[c.sym] || (m[c.sym] = { total: 0, colors: new Set() });
+    k.total++; k.colors.add(c.color);
+  }
+  return m;
+}
+function renderRules() {
+  const cnt = deckCounts();
+  const total = Object.values(cnt).reduce((s, k) => s + k.total, 0);
+  const sample = sym => cardEl({ id: -1, color: cnt[sym].colors.has('rainbow') ? 'rainbow' : 'red', sym }, { size: 'sm2' });
+  const countText = sym => {
+    const k = cnt[sym];
+    return k.colors.has('rainbow') ? `レインボー×${k.total}枚` : `4色×${k.total / 4}枚（計${k.total}枚）`;
+  };
+  const sec = (title, ...items) => h('div', { class: 'rsec' }, h('h3', {}, title), h('ul', {}, items.map(t => h('li', {}, t))));
+  return h('div', { class: 'log rules', id: 'rules-panel' },
+    h('div', { class: 'row', style: 'justify-content:space-between; margin-bottom:6px' }, h('b', { style: 'font-size:16px' }, 'UNYO のルール'),
+      h('button', { class: 'btn small ghost', onclick: () => { S.showRules = false; render(); } }, '閉じる')),
+    sec('勝ち負け',
+      '手札を最初に無くした人の勝ちです。',
+      '勝った人は「他の人の残り手札の枚数 × 10pt」を得点にします。バーストした人は300ptとして数えます。'),
+    sec('はじめ方',
+      '最初の手札は1人7枚です。',
+      '最初の場のカードは山札の一番上から出します。そのカードの効果は発動しません。'),
+    sec('自分の番',
+      '場のカードと同じ色か、同じ数字・マークのカードを1枚出せます。',
+      'レインボーのカードは、場に関係なくいつでも出せます。',
+      'カードを出さずにパスして1枚引くこともできます（出せるカードがあってもOK）。引いたカードが出せるなら、必ずそれを出します。出せなければ次の人の番です。'),
+    sec('UNYO',
+      '手札が2枚で出せるカードがあるときは、出す前に画面左下の「UNYO!」ボタンを押します。',
+      '宣言せずに出すと、ほかの人の画面に「UNYO忘れ！」ボタンが出ます。押されたら2枚引きます。',
+      'だれも指摘しないまま次の人が行動したら、もう指摘できません。'),
+    sec('ドロー系カードの重ね',
+      'ドロー系カードを出されたら、直前に出たカードと同じ枚数か、それより多いドロー系カードを重ねられます。引く枚数は足し算されていきます。',
+      '重ねられない・重ねないときは、合計の枚数を引いて番が終わります。',
+      'ドローワイルドは重ねることも、ほかのカードを重ねられることもありません。'),
+    sec('バースト',
+      '手札が25枚を超えた（26枚以上になった）瞬間に脱落します。',
+      '脱落した人の手札はシャッフルして山札の下に戻し、そのラウンドの番は飛ばされます。',
+      '最後に1人だけ残ったら、その人の勝ちです。'),
+    sec('山札が無くなったら',
+      '場の一番上の1枚を残して、ほかをシャッフルして山札に補充します。',
+      '補充するカードも無いときは、そのラウンドは無効試合（得点なし）です。'),
+    h('div', { class: 'rsec' }, h('h3', {}, `カード一覧（全${total}枚）`),
+      h('table', { class: 'rtable' },
+        CARD_INFO.filter(([sym]) => cnt[sym]).map(([sym, desc]) => h('tr', {},
+          h('td', {}, sample(sym)),
+          h('td', {}, h('b', {}, SYM_JA[sym] ?? sym), h('div', { class: 'rcount' }, countText(sym))),
+          h('td', {}, desc))))));
 }
 
 function renderModal() {
@@ -1068,23 +1243,38 @@ function renderModal() {
       h('div', { class: 'colors' }, COLORS.map(c =>
         h('button', { style: `background:${COLOR_HEX[c]}`, 'data-color': c, onclick: () => act({ t: 'dwcolor', color: c }) }, COLOR_JA[c])))));
   }
+  if (v.phase === 'three' && myTurn) {
+    const others = v.players.filter(p => p.id !== me && p.connected && !p.burst);
+    if (!v.hand.some(c => c.id === S.threeCard)) S.threeCard = null;
+    return h('div', { class: 'overlay' }, h('div', { class: 'dialog', style: 'width:min(620px,100%)' },
+      h('h2', {}, '3：相手に渡すカードを1枚選んでください'),
+      h('div', { class: 'hand three-hand', style: 'padding-top:16px; margin-bottom:14px' }, v.hand.map(c =>
+        cardEl(c, { size: 'sm2', playable: S.threeCard === c.id, dim: S.threeCard !== null && S.threeCard !== c.id,
+          onclick: () => { S.threeCard = c.id; render(); } }))),
+      h('h2', { style: 'font-size:16px' }, '渡す相手'),
+      h('div', { class: 'targets' }, others.map(p =>
+        h('button', { class: 'btn', 'data-target': p.id, disabled: S.threeCard === null,
+          onclick: () => { const cardId = S.threeCard; S.threeCard = null; act({ t: 'three', target: p.id, cardId }); } },
+          `${p.name}（${p.count}枚）に渡す`)))));
+  }
   if (v.phase === 'seven' && myTurn) {
     return h('div', { class: 'overlay' }, h('div', { class: 'dialog' },
       h('h2', {}, '7：手札を交換する相手を指名'),
-      h('div', { class: 'targets' }, v.players.filter(p => p.id !== me && p.connected).map(p =>
+      h('div', { class: 'targets' }, v.players.filter(p => p.id !== me && p.connected && !p.burst).map(p =>
         h('button', { class: 'btn', 'data-target': p.id, onclick: () => act({ t: 'seven', target: p.id }) }, `${p.name}（${p.count}枚）`)))));
   }
   if (v.phase === 'over') {
     const rows = v.players.slice().sort((a, b) => (v.totals[b.id] || 0) - (v.totals[a.id] || 0));
     return h('div', { class: 'overlay' }, h('div', { class: 'dialog result' },
-      h('div', { class: 'logo', style: 'font-size:34px' }, v.winner ? 'FINISH!' : 'ROUND END'),
+      h('div', { class: 'logo', style: 'font-size:34px' }, v.voided ? 'NO GAME' : v.winner ? 'FINISH!' : 'ROUND END'),
       v.winner
         ? h('h2', {}, `🎉 ${playerName(v, v.winner)} さんの勝ち！ +${v.roundScore}pt`)
-        : h('h2', {}, 'プレイヤーが足りないため終了しました'),
+        : h('h2', {}, v.voided ? '無効試合（得点なし）' : 'ラウンド終了'),
+      v.endReason && h('p', { style: 'margin:-6px 0 6px; opacity:.85; font-size:13px' }, v.endReason),
       h('table', {},
         h('tr', {}, h('th', {}, 'プレイヤー'), h('th', {}, '残り手札'), h('th', {}, '合計pt')),
         rows.map(p => h('tr', { class: p.id === v.winner ? 'win' : '' },
-          h('td', {}, p.name, p.id === me && '（あなた）'), h('td', {}, `${p.count}枚`), h('td', {}, `${v.totals[p.id] || 0}`)))),
+          h('td', {}, p.name, p.id === me && '（あなた）'), h('td', {}, p.burst ? 'バースト（300pt）' : `${p.count}枚`), h('td', {}, `${v.totals[p.id] || 0}`)))),
       S.isHost
         ? h('button', { class: 'btn primary', id: 'btn-next', onclick: () => act({ t: 'restart' }) }, '次のラウンドへ')
         : h('p', {}, h('span', { class: 'spinner' }), 'ホストが次のラウンドを始めるのを待っています…'),
