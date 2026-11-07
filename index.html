@@ -427,10 +427,25 @@ class Game {
 // =====================================================================
 
 const APP_ID = 'unyo-card-game-p2p-v1';
-const TRYSTERO_URLS = [
-  'https://esm.sh/trystero@0.21.5/nostr',
-  'https://cdn.jsdelivr.net/npm/trystero@0.21.5/+esm', // v0.21 の既定ストラテジーは Nostr
+const TRYSTERO_URLS = {
+  nostr: [
+    'https://esm.sh/trystero@0.21.5/nostr',
+    'https://cdn.jsdelivr.net/npm/trystero@0.21.5/+esm', // v0.21 の既定ストラテジーは Nostr
+  ],
+  torrent: ['https://esm.sh/trystero@0.21.5/torrent'],
+};
+// Trystero任せだと appId から決まる5つのリレーに死んだもの・拒否するものが混ざるため、
+// Trysteroの通信(エフェメラルイベント)を受け付けている公開リレーを明示的に全部使う
+const NOSTR_RELAYS = [
+  'wss://nos.lol',
+  'wss://relay.primal.net',
+  'wss://relay.snort.social',
+  'wss://nostr.mom',
+  'wss://cdn.satellite.earth',
+  'wss://relay.nostr.net',
+  'wss://relay.damus.io',
 ];
+const NET_LABEL = { nostr: 'Nostr', torrent: 'BitTorrent' };
 const params = new URLSearchParams(location.search);
 const LOCAL = params.has('local'); // ?local … 同一ブラウザのタブ間テスト用（BroadcastChannel）
 
@@ -438,11 +453,26 @@ const LOCAL = params.has('local'); // ?local … 同一ブラウザのタブ間�
 async function makeTransport(room) {
   if (LOCAL) return localTransport(room);
   let mod, lastErr;
-  for (const url of TRYSTERO_URLS) {
-    try { mod = await import(url); if (mod.joinRoom) break; } catch (e) { lastErr = e; }
+  for (const url of TRYSTERO_URLS[S.net]) {
+    try { mod = await import(url); if (mod.joinRoom) { S.diag.lib = url; break; } } catch (e) { lastErr = e; console.warn('import failed', url, e); }
   }
   if (!mod || !mod.joinRoom) throw lastErr || new Error('Trystero を読み込めませんでした');
-  const r = mod.joinRoom({ appId: APP_ID }, room);
+  const config = S.net === 'nostr' ? { appId: APP_ID, relayUrls: NOSTR_RELAYS } : { appId: APP_ID };
+  const r = mod.joinRoom(config, room, e => {
+    console.warn('[UNYO] join error', e);
+    S.diag.joinErr = (e && (e.error || e.message)) || String(e);
+    render();
+  });
+  // リレー接続状況の監視（診断表示用）
+  const getSockets = mod.getRelaySockets || mod.getTrackerSockets;
+  if (getSockets) setInterval(() => {
+    try {
+      const socks = Object.values(getSockets() || {});
+      const open = socks.filter(w => w && w.readyState === 1).length;
+      const txt = `${open}/${socks.length}`;
+      if (txt !== S.diag.relays) { S.diag.relays = txt; if (S.screen === 'room') render(); }
+    } catch {}
+  }, 1000);
   return {
     selfId: mod.selfId,
     onJoin: f => r.onPeerJoin(f),
@@ -491,6 +521,8 @@ const store = {
 const S = {
   screen: 'lobby', name: store.get('unyo-name') || '', room: (params.get('room') || '').toUpperCase(),
   isHost: false, selfId: null, hostId: null, lobby: null, view: null,
+  net: params.get('net') === 'torrent' ? 'torrent' : 'nostr',
+  diag: { lib: '', relays: '', joinErr: '', peers: 0, since: 0 },
   debug: false, showLog: false, status: '', error: '', hostLost: false, seenSeq: 0, seenRound: 0, A: null,
 };
 const H = { players: [], game: null, totals: {}, round: 1 }; // ホスト専用
@@ -507,6 +539,9 @@ async function connect(asHost) {
   try { t = await makeTransport(S.room); }
   catch (e) { console.error(e); S.screen = 'lobby'; S.status = ''; toast('通信ライブラリを読み込めませんでした。ネットワークを確認してください', 'err'); render(); return; }
   S.selfId = t.selfId;
+  S.diag.since = Date.now();
+  t.onJoin(() => { S.diag.peers++; if (S.screen === 'room') render(); });
+  t.onLeave(() => { S.diag.peers = Math.max(0, S.diag.peers - 1); });
   const A = S.A = {
     hi: t.action('hi'), lobby: t.action('lobby'), st: t.action('st'), act: t.action('act'), err: t.action('err'),
   };
@@ -544,6 +579,7 @@ function inviteUrl() {
   const u = new URL(location.href);
   u.search = ''; u.hash = '';
   u.searchParams.set('room', S.room);
+  if (S.net !== 'nostr') u.searchParams.set('net', S.net);
   if (LOCAL) u.searchParams.set('local', '');
   return u.toString().replace('local=', 'local');
 }
@@ -663,7 +699,10 @@ async function copy(text) {
   try { await navigator.clipboard.writeText(text); toast('コピーしました'); }
   catch { toast('コピーできませんでした。手動で選択してください', 'err'); }
 }
-function leaveRoom() { location.href = location.pathname + (LOCAL ? '?local' : ''); }
+function leaveRoom() {
+  const q = [S.net !== 'nostr' && 'net=' + S.net, LOCAL && 'local'].filter(Boolean).join('&');
+  location.href = location.pathname + (q ? '?' + q : '');
+}
 
 function render() {
   const app = document.getElementById('app');
@@ -686,6 +725,10 @@ function renderLobby() {
       h('h1', { class: 'logo' }, 'UNYO'),
       h('p', { class: 'sub' }, 'サーバー不要・P2Pで友達とオンライン対戦'),
       h('div', { class: 'field' }, h('label', { for: 'name' }, 'あなたの名前'), nameIn),
+      h('div', { class: 'field', style: 'margin-bottom:18px' }, h('label', {}, '接続方式（ホストと参加者で同じものを選んでください）'),
+        h('div', { class: 'row' }, ['nostr', 'torrent'].map(k => h('button', {
+          class: `btn small ${S.net === k ? 'primary' : 'ghost'}`, style: 'flex:1', id: 'net-' + k,
+          onclick: () => { S.net = k; render(); } }, k === 'nostr' ? 'Nostr（標準）' : 'BitTorrent（予備）')))),
       h('button', { class: 'btn primary', style: 'width:100%', id: 'btn-host', onclick: () => connect(true) }, '部屋を作る（ホスト）'),
       h('div', { class: 'or' }, '― または招待された部屋に参加 ―'),
       h('div', { class: 'row' }, codeIn, h('button', { class: 'btn', id: 'btn-join', onclick: () => connect(false) }, '参加')),
@@ -717,8 +760,19 @@ function renderRoom() {
               players.length < 2 ? 'あと1人以上待っています…' : `${players.length}人でゲーム開始！`)
             : h('p', { style: 'text-align:center; opacity:.85' }, h('span', { class: 'spinner' }),
               L.inGame && !meInGame ? 'ゲーム進行中です。次のラウンドから参加できます' : 'ホストの開始を待っています…')),
+      !LOCAL && !connecting && h('div', { class: 'note', id: 'diag', style: 'text-align:center; margin-top:12px' },
+        `接続方式：${NET_LABEL[S.net]}`,
+        S.diag.relays && `　リレー接続：${S.diag.relays}`,
+        `　見つかった相手：${S.diag.peers}人`,
+        S.diag.relays && S.diag.relays.startsWith('0/') && Date.now() - S.diag.since > 8000 &&
+          h('div', { style: 'color:#ffb3b3' }, 'リレーに1つもつながっていません。ネットワークや広告ブロッカーを確認してください'),
+        S.diag.joinErr && h('div', { style: 'color:#ffb3b3' }, `接続エラー：${S.diag.joinErr}`),
+        !S.isHost && !L && Date.now() - S.diag.since > 25000 &&
+          h('div', { style: 'color:#ffe08a' }, 'なかなか見つからない場合：ホストと接続方式が同じか確認し、だめなら両方とも「BitTorrent（予備）」に切り替えて作り直してください')),
       h('div', { style: 'text-align:center; margin-top:14px' }, h('button', { class: 'btn small ghost', onclick: leaveRoom }, '退出する'))));
 }
+// 待機画面の診断表示を定期更新
+setInterval(() => { if (S.screen === 'room' && !LOCAL) render(); }, 3000);
 
 function playerName(v, id) { return (v.players.find(p => p.id === id) || {}).name || '?'; }
 
