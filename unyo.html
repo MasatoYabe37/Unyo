@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UNYO - P2Pオンライン対戦</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=M+PLUS+Rounded+1c:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --red:#e5383b; --blue:#2f6fde; --yellow:#f2b705; --green:#2ea44f;
+  --ink:#10201a; --gold:#ffd23f;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{
+  font-family:'M PLUS Rounded 1c',system-ui,sans-serif; color:#f3f7f4;
+  background:radial-gradient(ellipse at 50% 40%,#22704f 0%,#124532 55%,#0a2a1e 100%) fixed;
+  min-height:100vh;
+}
+button{font-family:inherit}
+.btn{
+  font-weight:800; font-size:15px; border:none; border-radius:999px; padding:10px 20px;
+  background:#fff; color:var(--ink); cursor:pointer; box-shadow:0 3px 0 rgba(0,0,0,.35);
+  transition:transform .1s, filter .1s; white-space:nowrap;
+}
+.btn:hover{filter:brightness(1.06)}
+.btn:active{transform:translateY(2px); box-shadow:0 1px 0 rgba(0,0,0,.35)}
+.btn:disabled{opacity:.45; cursor:not-allowed; transform:none}
+.btn.primary{background:var(--gold)}
+.btn.ghost{background:rgba(255,255,255,.12); color:#fff; box-shadow:none; border:1px solid rgba(255,255,255,.25)}
+.btn.small{font-size:13px; padding:6px 12px}
+.btn.on{background:#ff7aa2; color:#fff}
+.btn.unyo{background:var(--red); color:#fff; font-family:'Dela Gothic One'; font-size:20px; letter-spacing:1px; animation:pulse 1s infinite}
+.btn.call{background:#ff8c00; color:#fff; font-size:17px; animation:shake .6s infinite}
+@keyframes pulse{50%{transform:scale(1.08)}}
+@keyframes shake{0%,100%{transform:rotate(0)}25%{transform:rotate(-3deg)}75%{transform:rotate(3deg)}}
+input{
+  font-family:inherit; font-size:16px; padding:10px 14px; border-radius:12px; border:2px solid rgba(255,255,255,.3);
+  background:rgba(0,0,0,.25); color:#fff; outline:none; width:100%;
+}
+input:focus{border-color:var(--gold)}
+.logo{font-family:'Dela Gothic One'; color:var(--gold); letter-spacing:2px; text-shadow:0 4px 0 #8a5a00, 0 8px 18px rgba(0,0,0,.4)}
+
+/* ===== Lobby ===== */
+.center-wrap{min-height:100vh; display:grid; place-items:center; padding:24px}
+.panel{background:rgba(0,0,0,.28); border:1px solid rgba(255,255,255,.12); border-radius:22px; padding:28px; width:min(440px,100%); backdrop-filter:blur(4px)}
+.panel h1{font-size:64px; margin:0; text-align:center}
+.sub{text-align:center; opacity:.8; margin:4px 0 22px; font-size:14px}
+.field{margin-bottom:14px}
+.field label{display:block; font-size:13px; opacity:.8; margin-bottom:6px; font-weight:700}
+.row{display:flex; gap:10px; align-items:center}
+.or{text-align:center; opacity:.6; margin:18px 0; font-size:13px}
+.note{font-size:12px; opacity:.7; line-height:1.6; margin-top:16px}
+.badge-local{display:inline-block; background:#ff7aa2; color:#fff; font-size:12px; padding:2px 10px; border-radius:99px; margin-bottom:10px}
+.code{font-family:'Dela Gothic One'; font-size:40px; letter-spacing:6px; text-align:center; color:var(--gold)}
+.plist{list-style:none; padding:0; margin:14px 0}
+.plist li{background:rgba(255,255,255,.08); border-radius:12px; padding:10px 14px; margin-bottom:6px; display:flex; justify-content:space-between}
+.tag{font-size:11px; background:rgba(255,255,255,.18); padding:2px 8px; border-radius:99px; margin-left:6px}
+.spinner{display:inline-block; width:14px; height:14px; border:2px solid #fff6; border-top-color:#fff; border-radius:50%; animation:spin 1s linear infinite; vertical-align:-2px; margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ===== Game ===== */
+.game{display:flex; flex-direction:column; min-height:100vh}
+.topbar{display:flex; align-items:center; gap:10px; padding:8px 14px; background:rgba(0,0,0,.25); flex-wrap:wrap}
+.topbar .logo{font-size:22px; text-shadow:0 2px 0 #8a5a00}
+.topbar .info{font-size:13px; opacity:.85}
+.topbar .sp{flex:1}
+.opps{display:flex; flex-wrap:wrap; justify-content:center; gap:12px; padding:14px}
+.seat{background:rgba(0,0,0,.25); border:2px solid transparent; border-radius:16px; padding:8px 12px; min-width:150px; max-width:100%; transition:border-color .2s, box-shadow .2s}
+.seat.turn{border-color:var(--gold); box-shadow:0 0 18px rgba(255,210,63,.45)}
+.seat.off{opacity:.4}
+.seat .nm{font-weight:800; display:flex; gap:6px; align-items:center; justify-content:space-between; font-size:14px}
+.seat .cnt{font-family:'Dela Gothic One'; font-size:13px; background:#fff; color:var(--ink); border-radius:99px; padding:1px 8px}
+.seat .pts{font-size:11px; opacity:.7}
+.fan{display:flex; flex-wrap:wrap; margin-top:6px; padding-left:14px; row-gap:4px}
+.fan .card{margin-left:-14px}
+.fan .more{align-self:center; margin-left:4px; font-size:12px; opacity:.8}
+.mark{font-size:11px; font-weight:800; padding:1px 7px; border-radius:99px; background:var(--red); color:#fff}
+.mark.y{background:var(--gold); color:var(--ink)}
+
+.table{flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; padding:8px}
+.piles{display:flex; align-items:center; gap:28px}
+.pile{display:flex; flex-direction:column; align-items:center; gap:6px; font-size:12px; opacity:.95}
+.deck{position:relative; cursor:default}
+.deck.can{cursor:pointer}
+.deck.can .card{box-shadow:0 0 0 3px #fff8, 0 0 20px 4px var(--gold)}
+.deck .stack{position:absolute; inset:0; transform:translate(4px,4px); z-index:-1}
+.discard{position:relative; padding:6px; border-radius:22px}
+.side{display:flex; flex-direction:column; gap:8px; align-items:flex-start; min-width:130px}
+.chip{display:flex; align-items:center; gap:6px; background:rgba(0,0,0,.3); border-radius:99px; padding:4px 12px 4px 6px; font-size:13px; font-weight:700}
+.dot{width:18px; height:18px; border-radius:50%; border:2px solid #fff}
+.pending{font-family:'Dela Gothic One'; background:var(--red); color:#fff; border-radius:12px; padding:6px 12px; font-size:18px; animation:pulse 1s infinite}
+.order{display:flex; flex-wrap:wrap; gap:4px; align-items:center; justify-content:center; font-size:12px; opacity:.9; max-width:640px}
+.order span.o{background:rgba(0,0,0,.28); padding:2px 9px; border-radius:99px}
+.order span.o.cur{background:var(--gold); color:var(--ink); font-weight:800}
+.status{font-size:17px; font-weight:800; text-align:center; min-height:26px; padding:0 12px; text-shadow:0 2px 4px rgba(0,0,0,.4)}
+
+.me{background:rgba(0,0,0,.3); border-top:1px solid rgba(255,255,255,.12); padding:10px 12px 16px}
+.me.turn{box-shadow:inset 0 3px 0 var(--gold)}
+.actions{display:flex; justify-content:center; gap:10px; flex-wrap:wrap; min-height:46px; align-items:center}
+.mehead{display:flex; justify-content:center; gap:10px; align-items:center; font-size:13px; margin-bottom:4px; opacity:.9}
+.hand{display:flex; flex-wrap:wrap; justify-content:center; gap:6px; padding-top:16px}
+
+/* ===== Cards (UNYOオリジナルデザイン) ===== */
+.card{
+  --w:72px; width:var(--w); height:calc(var(--w)*1.45); border-radius:calc(var(--w)*.14);
+  position:relative; flex:none; background:var(--cc,#555); border:calc(var(--w)*.045) solid #fff;
+  box-shadow:0 2px 0 rgba(0,0,0,.25), 0 6px 14px rgba(0,0,0,.35);
+  display:grid; place-items:center; overflow:hidden; color:#fff; user-select:none;
+  font-family:'Dela Gothic One',sans-serif; transition:transform .15s, box-shadow .15s, filter .15s;
+}
+.card::before{
+  content:''; position:absolute; inset:11% 13%; border-radius:calc(var(--w)*.09);
+  background:repeating-linear-gradient(135deg,rgba(255,255,255,.18) 0 5px,transparent 5px 11px);
+  border:calc(var(--w)*.025) solid rgba(255,255,255,.55);
+}
+.card .mid{position:relative; font-size:calc(var(--w)*.48); line-height:1; -webkit-text-stroke:calc(var(--w)*.03) rgba(0,0,0,.4); paint-order:stroke fill; text-shadow:0 calc(var(--w)*.04) 0 rgba(0,0,0,.3)}
+.card .mid.ul{text-decoration:underline; text-underline-offset:4px; text-decoration-thickness:3px}
+.card .cn{position:absolute; font-size:calc(var(--w)*.19); line-height:1; -webkit-text-stroke:1px rgba(0,0,0,.3); paint-order:stroke fill}
+.card .tl{top:4%; left:7%} .card .br{bottom:4%; right:7%; transform:rotate(180deg)}
+.c-red{--cc:var(--red)} .c-blue{--cc:var(--blue)} .c-yellow{--cc:var(--yellow)} .c-green{--cc:var(--green)}
+.c-rainbow{background:conic-gradient(from 45deg,var(--red) 0 25%,var(--yellow) 0 50%,var(--green) 0 75%,var(--blue) 0 100%)}
+.c-rainbow::before{background:#1b1730; inset:16% 18%; border-color:#fff}
+.card.sm{--w:34px; box-shadow:0 1px 3px rgba(0,0,0,.4)}
+.card.sm .cn{display:none}
+.card.sm::before{border-width:1px}
+.card.lg{--w:96px}
+.card.playable{cursor:pointer; transform:translateY(-12px); box-shadow:0 0 0 3px rgba(255,255,255,.7), 0 0 20px 5px rgba(255,224,102,.8)}
+.card.playable:hover{transform:translateY(-18px) scale(1.04)}
+.card.dim{filter:brightness(.6) saturate(.7)}
+.card.forced{animation:pulse .8s infinite}
+.back{background:radial-gradient(circle at 30% 20%,#5a46a8,#1c1540 75%)}
+.back::before{background:radial-gradient(rgba(255,255,255,.18) 1.4px,transparent 1.6px) 0 0/9px 9px; border-color:rgba(255,210,63,.6)}
+.backlogo{position:relative; color:var(--gold); font-size:calc(var(--w)*.22); padding:2px 5px; border:2px solid var(--gold); border-radius:6px; background:#1c1540; letter-spacing:1px}
+.card.sm .backlogo{display:none}
+
+/* ===== Overlays ===== */
+#modal:empty{display:none}
+.overlay{position:fixed; inset:0; background:rgba(0,0,0,.55); display:grid; place-items:center; z-index:50; padding:16px}
+.dialog{background:#163f2f; border:2px solid rgba(255,255,255,.2); border-radius:22px; padding:22px; width:min(460px,100%); text-align:center; box-shadow:0 20px 50px rgba(0,0,0,.5)}
+.dialog h2{margin:0 0 14px; font-size:20px}
+.colors{display:grid; grid-template-columns:1fr 1fr; gap:12px}
+.colors button{height:80px; border-radius:16px; border:3px solid #fff; color:#fff; font-size:20px; font-weight:800; cursor:pointer; text-shadow:0 2px 2px rgba(0,0,0,.4)}
+.targets{display:flex; flex-direction:column; gap:8px}
+.result table{width:100%; border-collapse:collapse; margin:10px 0 16px; font-size:14px}
+.result td,.result th{padding:6px 8px; border-bottom:1px solid rgba(255,255,255,.15)}
+.result .win{color:var(--gold); font-weight:800}
+#toasts{position:fixed; top:64px; left:12px; z-index:60; display:flex; flex-direction:column; gap:6px; align-items:flex-start; pointer-events:none; width:min(80vw,340px)}
+.toast{background:rgba(10,20,15,.92); border:1px solid rgba(255,255,255,.2); padding:8px 14px; border-radius:14px; font-weight:700; font-size:13px; animation:tin .25s ease-out}
+.toast.err{background:#8b1e22}
+.toast.out{opacity:0; transition:opacity .4s}
+@keyframes tin{from{transform:translateY(-10px); opacity:0}}
+.log{position:fixed; right:0; top:0; bottom:0; width:min(320px,86vw); background:rgba(5,15,10,.95); z-index:40; padding:14px; overflow:auto; font-size:13px; line-height:1.6; border-left:1px solid rgba(255,255,255,.15)}
+.log div.b{color:var(--gold); font-weight:700}
+.debugbar{background:rgba(255,122,162,.18); color:#ffd0de; font-size:12px; text-align:center; padding:3px}
+@media (max-width:600px){
+  .card{--w:54px} .card.lg{--w:76px} .card.sm{--w:28px}
+  .panel h1{font-size:48px}
+  .piles{gap:16px}
+  .side{min-width:0}
+}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="modal"></div>
+<div id="toasts"></div>
+
+<script type="module">
+// =====================================================================
+//  ENGINE-START  （ルールエンジン：DOMに依存しない。ホストだけが動かす）
+// =====================================================================
+const COLORS = ['red', 'blue', 'yellow', 'green'];
+const COLOR_JA = { red: '赤', blue: '青', yellow: '黄', green: '緑', rainbow: 'レインボー' };
+const SYM_JA = { skip: 'スキップ', reverse: 'リバース', draw4: 'ドロー4', wild: 'ワイルド' };
+function cardName(c) {
+  if (c.color === 'rainbow') return SYM_JA[c.sym];
+  return `${COLOR_JA[c.color]}の${SYM_JA[c.sym] ?? c.sym}`;
+}
+function shuffle(a) {
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+function buildDeck() {
+  const d = []; let id = 0;
+  const add = (color, sym) => d.push({ id: id++, color, sym });
+  for (const c of COLORS) {
+    for (let n = 0; n <= 9; n++) { add(c, String(n)); add(c, String(n)); } // 0〜9 各2枚
+    for (const s of ['skip', 'reverse']) { add(c, s); add(c, s); }        // スキップ・リバース 各2枚
+  }
+  for (let i = 0; i < 2; i++) { add('rainbow', 'draw4'); add('rainbow', 'wild'); } // レインボー 各2枚
+  return d; // 合計 100枚
+}
+
+class Game {
+  constructor(players, opts = {}) {
+    this.players = players.map(p => ({ id: p.id, name: p.name, hand: [], connected: true }));
+    this.totals = opts.totals || {};
+    this.round = opts.round || 1;
+    this.log = []; this.seq = 0;
+  }
+  addLog(text, big = false) {
+    this.seq++; this.log.push({ seq: this.seq, text, big });
+    if (this.log.length > 80) this.log.shift();
+  }
+  start() {
+    this.deck = shuffle(buildDeck());
+    this.discard = [];
+    for (let r = 0; r < 7; r++) for (const p of this.players) p.hand.push(this.deck.pop());
+    const first = this.deck.pop();              // 最初の場のカードは山札の上から
+    this.discard.push(first);
+    this.color = first.color === 'rainbow' ? null : first.color; // null = どの色でもOK
+    this.dir = 1;
+    this.turn = Math.floor(Math.random() * this.players.length);
+    this.pending = 0;          // ドロー4の累積枚数
+    this.phase = 'play';       // play | color | seven | over
+    this.forced = null;        // パスで引いたカードが出せる場合、そのカードID
+    this.unyoDeclared = false; // 現在の手番プレイヤーがUNYO宣言済みか
+    this.unyoTarget = null;    // UNYO忘れで指摘可能なプレイヤーID
+    this.winner = null; this.roundScore = 0;
+    this.addLog(`第${this.round}ラウンド開始！最初の場のカードは「${cardName(first)}」`, true);
+    this.addLog(`${this.cur().name} さんの番です`);
+  }
+  cur() { return this.players[this.turn]; }
+  byId(id) { return this.players.find(p => p.id === id); }
+  top() { return this.discard[this.discard.length - 1]; }
+  connectedCount() { return this.players.filter(p => p.connected).length; }
+  canPlay(c) {
+    if (this.pending > 0) return c.sym === 'draw4';   // ドロー4が来ているときは重ねるだけ
+    if (c.color === 'rainbow') return true;           // レインボーはいつでも
+    if (this.color === null) return true;
+    return c.color === this.color || c.sym === this.top().sym;
+  }
+  refill() {
+    if (this.discard.length <= 1) return false;
+    const top = this.discard.pop();
+    this.deck = shuffle(this.discard);
+    this.discard = [top];
+    this.addLog('山札が無くなったので、場のカード（最新の1枚以外）をシャッフルして補充しました', true);
+    return true;
+  }
+  drawCards(p, n) {
+    const got = [];
+    for (let i = 0; i < n; i++) {
+      if (this.deck.length === 0 && !this.refill()) break;
+      const c = this.deck.pop(); p.hand.push(c); got.push(c);
+    }
+    if (got.length < n) this.addLog(`カードが足りず ${got.length} 枚しか引けませんでした`);
+    return got;
+  }
+  nextIdx(from, steps = 1) {
+    const n = this.players.length; let i = from;
+    if (this.connectedCount() === 0) return i;
+    for (let s = 0; s < steps; s++) {
+      do { i = (i + this.dir + n) % n; } while (!this.players[i].connected);
+    }
+    return i;
+  }
+  advance(steps = 1) {
+    this.turn = this.nextIdx(this.turn, steps);
+    this.unyoDeclared = false; this.forced = null; this.phase = 'play';
+    this.addLog(`${this.cur().name} さんの番です`);
+  }
+  rotateHands() {
+    const idxs = this.players.map((_, i) => i).filter(i => this.players[i].connected);
+    const m = idxs.length, hands = idxs.map(i => this.players[i].hand), nh = new Array(m);
+    for (let k = 0; k < m; k++) nh[(k + this.dir + m) % m] = hands[k];
+    idxs.forEach((i, k) => { this.players[i].hand = nh[k]; });
+    this.addLog('全員が次の人へ手札を渡しました！', true);
+  }
+  finish(p) {
+    this.phase = 'over'; this.winner = p.id; this.pending = 0; this.unyoTarget = null;
+    this.roundScore = this.players.filter(q => q.id !== p.id).reduce((s, q) => s + q.hand.length * 10, 0);
+    this.totals[p.id] = (this.totals[p.id] || 0) + this.roundScore;
+    this.addLog(`🎉 ${p.name} さんが上がり！ ${this.roundScore}pt 獲得`, true);
+  }
+  setDisconnected(pid) {
+    const p = this.byId(pid); if (!p || !p.connected) return;
+    p.connected = false;
+    this.addLog(`${p.name} さんが切断しました（以降の手番は飛ばされます）`, true);
+    if (this.phase === 'over') return;
+    if (this.unyoTarget === pid) this.unyoTarget = null;
+    if (this.connectedCount() < 2) {
+      this.phase = 'over'; this.winner = null;
+      this.addLog('プレイヤーが足りないため、このラウンドを終了します', true);
+      return;
+    }
+    if (this.cur().id === pid) {
+      if (this.phase === 'color') {
+        this.color = COLORS[Math.floor(Math.random() * 4)];
+        this.addLog(`色はランダムで「${COLOR_JA[this.color]}」になりました`);
+      } else if (this.phase === 'play' && this.pending > 0) {
+        this.drawCards(p, this.pending); this.pending = 0;
+      }
+      this.advance(1);
+    }
+  }
+
+  // 操作を検証して適用する。エラー時はメッセージ文字列を返す
+  handle(pid, a) {
+    if (this.phase === 'over') return 'このラウンドは終了しています';
+    const p = this.byId(pid);
+    if (!p || !p.connected) return 'このラウンドの参加者ではありません';
+    const isCur = this.cur().id === pid;
+    switch (a && a.t) {
+      case 'unyo': {
+        if (!isCur || this.phase !== 'play') return 'あなたの番ではありません';
+        if (p.hand.length !== 2) return 'UNYOは手札が2枚のときに宣言できます';
+        if (!this.unyoDeclared) { this.unyoDeclared = true; this.addLog(`${p.name}「UNYO！」`, true); }
+        return null;
+      }
+      case 'callout': {
+        if (!this.unyoTarget) return '指摘できる相手がいません';
+        if (this.unyoTarget === pid) return '自分は指摘できません';
+        const t = this.byId(this.unyoTarget); this.unyoTarget = null;
+        if (!t) return null;
+        this.drawCards(t, 2);
+        this.addLog(`${p.name} さんが ${t.name} さんの「UNYO忘れ」を指摘！ ${t.name} さんは2枚ドロー`, true);
+        return null;
+      }
+      case 'play': {
+        if (!isCur) return 'あなたの番ではありません';
+        if (this.phase !== 'play') return '選択を完了してください';
+        const idx = p.hand.findIndex(c => c.id === a.cardId);
+        if (idx < 0) return 'そのカードは持っていません';
+        const c = p.hand[idx];
+        if (this.forced !== null && c.id !== this.forced) return '引いたカードを出さなければいけません';
+        if (!this.canPlay(c)) return this.pending > 0 ? 'ドロー4を重ねるか、カードを引いてください' : 'そのカードは出せません';
+        const before = p.hand.length;
+        this.unyoTarget = null;               // 次の人がカードを出したら UNYO忘れ は時効
+        p.hand.splice(idx, 1); this.discard.push(c); this.forced = null;
+        this.addLog(`${p.name} さんが「${cardName(c)}」を出しました`);
+        if (before === 2 && !this.unyoDeclared) this.unyoTarget = pid; // UNYO宣言忘れ
+        this.unyoDeclared = false;
+        if (p.hand.length === 0) { this.finish(p); return null; }
+        if (c.color !== 'rainbow') this.color = c.color;
+        switch (c.sym) {
+          case 'draw4':
+            this.pending += 4; this.phase = 'color';
+            this.addLog(`ドロー${this.pending}！`, true); break;
+          case 'wild':
+            this.phase = 'color'; break;
+          case '7':
+            if (this.players.some(q => q.id !== pid && q.connected)) this.phase = 'seven';
+            else this.advance(1);
+            break;
+          case '0':
+            this.rotateHands(); this.advance(1); break;
+          case 'skip':
+            this.addLog(`${this.players[this.nextIdx(this.turn, 1)].name} さんはスキップ！`, true);
+            this.advance(2); break;
+          case 'reverse':
+            this.dir *= -1; this.addLog('順番が逆回りになりました', true);
+            this.advance(1); break;
+          default:
+            this.advance(1);
+        }
+        return null;
+      }
+      case 'color': {
+        if (!isCur || this.phase !== 'color') return '色を選ぶタイミングではありません';
+        if (!COLORS.includes(a.color)) return '不正な色です';
+        this.color = a.color;
+        this.addLog(`${p.name} さんが色を「${COLOR_JA[a.color]}」に指定`, true);
+        this.advance(1);
+        return null;
+      }
+      case 'seven': {
+        if (!isCur || this.phase !== 'seven') return '交換相手を選ぶタイミングではありません';
+        const t = this.byId(a.target);
+        if (!t || t.id === pid || !t.connected) return '交換相手を選んでください（自分は選べません）';
+        [p.hand, t.hand] = [t.hand, p.hand];
+        this.addLog(`${p.name} さんと ${t.name} さんが手札を交換！`, true);
+        this.advance(1);
+        return null;
+      }
+      case 'draw': {
+        if (!isCur) return 'あなたの番ではありません';
+        if (this.phase !== 'play') return '選択を完了してください';
+        if (this.forced !== null) return '引いたカードを出してください';
+        if (this.pending > 0) {
+          const n = this.pending; this.pending = 0; this.unyoTarget = null;
+          this.drawCards(p, n);
+          this.addLog(`${p.name} さんは ${n} 枚ドロー`, true);
+          this.advance(1);
+          return null;
+        }
+        if (p.hand.some(c => this.canPlay(c))) return '出せるカードがあるのでパスできません';
+        this.unyoTarget = null;
+        this.addLog(`${p.name} さんはパス（1枚ドロー）`);
+        const [c] = this.drawCards(p, 1);
+        if (c && this.canPlay(c)) {
+          this.forced = c.id;
+          this.addLog(`引いたカードが出せるので、${p.name} さんはそれを出さなければいけません`);
+        } else this.advance(1);
+        return null;
+      }
+    }
+    return '不明な操作です';
+  }
+
+  // 各プレイヤーに送る画面用データ（allHands はデバッグ表示用）
+  view(pid) {
+    const me = this.byId(pid), cur = this.cur();
+    const myTurn = me && cur.id === pid && this.phase === 'play';
+    return {
+      round: this.round,
+      players: this.players.map(p => ({ id: p.id, name: p.name, count: p.hand.length, connected: p.connected })),
+      hand: me ? me.hand : [],
+      allHands: Object.fromEntries(this.players.map(p => [p.id, p.hand])),
+      top: this.top(), color: this.color, dir: this.dir, turnId: cur.id,
+      pending: this.pending, phase: this.phase, forced: this.forced,
+      unyoTarget: this.unyoTarget, unyoDeclared: this.unyoDeclared,
+      deckCount: this.deck.length, discardCount: this.discard.length,
+      log: this.log.slice(-50), seq: this.seq,
+      winner: this.winner, roundScore: this.roundScore, totals: { ...this.totals },
+      playable: myTurn ? me.hand.filter(c => this.canPlay(c) && (this.forced === null || c.id === this.forced)).map(c => c.id) : [],
+    };
+  }
+}
+// ENGINE-END
+// =====================================================================
+
+const APP_ID = 'unyo-card-game-p2p-v1';
+const TRYSTERO_URLS = [
+  'https://esm.sh/trystero@0.21.5/nostr',
+  'https://cdn.jsdelivr.net/npm/trystero@0.21.5/+esm', // v0.21 の既定ストラテジーは Nostr
+];
+const params = new URLSearchParams(location.search);
+const LOCAL = params.has('local'); // ?local … 同一ブラウザのタブ間テスト用（BroadcastChannel）
+
+// ---------- 通信レイヤー ----------
+async function makeTransport(room) {
+  if (LOCAL) return localTransport(room);
+  let mod, lastErr;
+  for (const url of TRYSTERO_URLS) {
+    try { mod = await import(url); if (mod.joinRoom) break; } catch (e) { lastErr = e; }
+  }
+  if (!mod || !mod.joinRoom) throw lastErr || new Error('Trystero を読み込めませんでした');
+  const r = mod.joinRoom({ appId: APP_ID }, room);
+  return {
+    selfId: mod.selfId,
+    onJoin: f => r.onPeerJoin(f),
+    onLeave: f => r.onPeerLeave(f),
+    action(name) {
+      const a = r.makeAction(name);
+      const send = Array.isArray(a) ? a[0] : a.send;
+      const recv = Array.isArray(a) ? a[1] : a.receive;
+      return { send: (d, to) => send(d, to ?? null), on: f => recv(f) };
+    },
+    leave: () => r.leave(),
+  };
+}
+function localTransport(room) {
+  const selfId = Math.random().toString(36).slice(2, 10);
+  const bc = new BroadcastChannel('unyo-local-' + room);
+  const joinH = [], leaveH = [], acts = {}, peers = new Set();
+  const addPeer = id => { if (peers.has(id)) return; peers.add(id); joinH.forEach(f => f(id)); };
+  bc.onmessage = ({ data: m }) => {
+    if (m.from === selfId || (m.to && m.to !== selfId)) return;
+    if (m.k === 'join') { addPeer(m.from); bc.postMessage({ k: 'here', from: selfId, to: m.from }); }
+    else if (m.k === 'here') addPeer(m.from);
+    else if (m.k === 'leave') { if (peers.delete(m.from)) leaveH.forEach(f => f(m.from)); }
+    else if (m.k === 'msg') acts[m.name]?.(m.data, m.from);
+  };
+  setTimeout(() => bc.postMessage({ k: 'join', from: selfId }), 60);
+  addEventListener('pagehide', () => bc.postMessage({ k: 'leave', from: selfId }));
+  return {
+    selfId,
+    onJoin: f => joinH.push(f), onLeave: f => leaveH.push(f),
+    action(name) {
+      return {
+        send: (data, to) => bc.postMessage({ k: 'msg', name, data, from: selfId, to: to || null }),
+        on: f => { acts[name] = f; },
+      };
+    },
+    leave() { bc.postMessage({ k: 'leave', from: selfId }); bc.close(); },
+  };
+}
+
+// ---------- 状態 ----------
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+const S = {
+  screen: 'lobby', name: store.get('unyo-name') || '', room: (params.get('room') || '').toUpperCase(),
+  isHost: false, selfId: null, hostId: null, lobby: null, view: null,
+  debug: false, showLog: false, status: '', error: '', hostLost: false, seenSeq: 0, seenRound: 0, A: null,
+};
+const H = { players: [], game: null, totals: {}, round: 1 }; // ホスト専用
+
+// ---------- 接続 ----------
+async function connect(asHost) {
+  S.name = (S.name || '').trim().slice(0, 12);
+  if (!S.name) { toast('名前を入力してください', 'err'); return; }
+  store.set('unyo-name', S.name);
+  if (asHost) S.room = genCode();
+  if (!S.room) { toast('部屋コードを入力してください', 'err'); return; }
+  S.isHost = asHost; S.screen = 'room'; S.status = 'connecting'; render();
+  let t;
+  try { t = await makeTransport(S.room); }
+  catch (e) { console.error(e); S.screen = 'lobby'; S.status = ''; toast('通信ライブラリを読み込めませんでした。ネットワークを確認してください', 'err'); render(); return; }
+  S.selfId = t.selfId;
+  const A = S.A = {
+    hi: t.action('hi'), lobby: t.action('lobby'), st: t.action('st'), act: t.action('act'), err: t.action('err'),
+  };
+  if (asHost) {
+    S.hostId = t.selfId;
+    H.players = [{ id: t.selfId, name: S.name }];
+    t.onJoin(id => A.lobby.send(lobbyData(), id));
+    A.hi.on((d, from) => hostOnHi(d, from));
+    A.act.on((a, from) => hostAct(from, a));
+    A.st.on(() => {}); A.err.on(() => {}); A.lobby.on(() => {});
+    t.onLeave(id => hostOnLeave(id));
+  } else {
+    t.onJoin(id => A.hi.send({ name: S.name }, id));
+    A.hi.on(() => {}); A.act.on(() => {});
+    A.lobby.on((d, from) => {
+      if (S.hostId && S.hostId !== from) return;
+      S.hostId = from; S.lobby = d;
+      if (S.screen !== 'game') S.screen = 'room'; // ゲーム画面への遷移は状態(st)の受信で行う
+      render();
+    });
+    A.st.on((v, from) => {
+      if (from !== S.hostId) return;
+      setView(v); S.screen = 'game'; render();
+    });
+    A.err.on(m => toast(m, 'err'));
+    t.onLeave(id => { if (id === S.hostId) { S.hostLost = true; render(); } });
+  }
+  S.status = 'ready'; render();
+}
+function genCode() {
+  const cs = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  return Array.from({ length: 6 }, () => cs[Math.floor(Math.random() * cs.length)]).join('');
+}
+function inviteUrl() {
+  const u = new URL(location.href);
+  u.search = ''; u.hash = '';
+  u.searchParams.set('room', S.room);
+  if (LOCAL) u.searchParams.set('local', '');
+  return u.toString().replace('local=', 'local');
+}
+
+// ---------- ホスト処理 ----------
+function lobbyData() {
+  const inGameIds = H.game ? new Set(H.game.players.filter(p => p.connected).map(p => p.id)) : new Set();
+  return {
+    hostId: S.selfId, room: S.room,
+    inGame: !!(H.game && H.game.phase !== 'over'),
+    players: H.players.map(p => ({ id: p.id, name: p.name, inGame: inGameIds.has(p.id) })),
+  };
+}
+function broadcastLobby() {
+  if (!S.A) return;
+  S.A.lobby.send(lobbyData());
+  S.lobby = lobbyData();
+}
+function hostOnHi(d, from) {
+  const name = String((d && d.name) || '').trim().slice(0, 12) || 'プレイヤー';
+  const ex = H.players.find(p => p.id === from);
+  if (ex) ex.name = name;
+  else {
+    if (H.players.length >= 10) { S.A.err.send('満員です（最大10人）', from); return; }
+    H.players.push({ id: from, name });
+    toast(`${name} さんが入室しました`);
+    if (H.game && H.game.phase !== 'over') S.A.err.send('ゲーム進行中です。次のラウンドから参加できます', from);
+  }
+  broadcastLobby();
+  if (H.game && H.game.byId(from)) S.A.st.send(H.game.view(from), from);
+  render();
+}
+function hostOnLeave(id) {
+  const p = H.players.find(x => x.id === id);
+  if (!p) return;
+  H.players = H.players.filter(x => x.id !== id);
+  if (H.game) H.game.setDisconnected(id); else toast(`${p.name} さんが退室しました`);
+  broadcastLobby();
+  if (H.game) broadcastState(); else render();
+}
+function hostStart() {
+  if (H.players.length < 2) { toast('2人以上で開始できます', 'err'); return; }
+  H.game = new Game(H.players, { totals: H.totals, round: H.round++ });
+  H.game.start();
+  broadcastLobby();
+  broadcastState();
+}
+function broadcastState() {
+  const g = H.game; if (!g) return;
+  for (const p of g.players) {
+    if (p.id === S.selfId) continue;
+    if (p.connected) S.A.st.send(g.view(p.id), p.id);
+  }
+  setView(g.view(S.selfId)); S.screen = 'game';
+  render();
+}
+function hostAct(pid, a) {
+  if (a && a.t === 'restart') { if (pid === S.selfId) hostStart(); return; }
+  if (!H.game) return;
+  const e = H.game.handle(pid, a);
+  if (e) { if (pid === S.selfId) toast(e, 'err'); else S.A.err.send(e, pid); return; }
+  if (H.game.phase === 'over') broadcastLobby();
+  broadcastState();
+}
+function act(a) {
+  if (S.isHost) hostAct(S.selfId, a);
+  else if (S.A && S.hostId) S.A.act.send(a, S.hostId);
+}
+
+// ---------- 画面 ----------
+function setView(v) {
+  if (v.round !== S.seenRound) { S.seenRound = v.round; S.seenSeq = 0; }
+  const fresh = v.log.filter(l => l.big && l.seq > S.seenSeq);
+  if (S.seenSeq > 0 || fresh.length <= 2) fresh.slice(-3).forEach(l => toast(l.text));
+  S.seenSeq = v.seq;
+  S.view = v;
+}
+function h(tag, props, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props || {})) {
+    if (v === false || v == null) continue;
+    if (k === 'class') el.className = v;
+    else if (k === 'style') el.style.cssText = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (k === 'value') el.value = v;
+    else el.setAttribute(k, v === true ? '' : v);
+  }
+  for (const kid of kids.flat(Infinity)) {
+    if (kid == null || kid === false) continue;
+    el.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
+  }
+  return el;
+}
+const SYM_LABEL = { skip: '⊘', reverse: '⇄', draw4: '+4', wild: '★' };
+function cardEl(c, o = {}) {
+  const lab = SYM_LABEL[c.sym] ?? c.sym;
+  const ul = c.sym === '6' || c.sym === '9';
+  return h('div', {
+    class: `card c-${c.color} ${o.size || ''} ${o.playable ? 'playable' : ''} ${o.dim ? 'dim' : ''} ${o.forced ? 'forced' : ''}`,
+    title: cardName(c), onclick: o.onclick, 'data-card': c.id,
+  },
+    h('span', { class: 'cn tl' }, lab),
+    h('span', { class: 'mid' + (ul ? ' ul' : '') }, lab),
+    h('span', { class: 'cn br' }, lab));
+}
+function backEl(size) { return h('div', { class: `card back ${size || ''}` }, h('span', { class: 'backlogo' }, 'UNYO')); }
+const COLOR_HEX = { red: 'var(--red)', blue: 'var(--blue)', yellow: 'var(--yellow)', green: 'var(--green)' };
+
+function toast(text, kind = '') {
+  const box = document.getElementById('toasts');
+  const t = h('div', { class: `toast ${kind}` }, text);
+  box.append(t);
+  while (box.children.length > 4) box.firstChild.remove();
+  setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 450); }, 2800);
+}
+async function copy(text) {
+  try { await navigator.clipboard.writeText(text); toast('コピーしました'); }
+  catch { toast('コピーできませんでした。手動で選択してください', 'err'); }
+}
+function leaveRoom() { location.href = location.pathname + (LOCAL ? '?local' : ''); }
+
+function render() {
+  const app = document.getElementById('app');
+  const modal = document.getElementById('modal');
+  modal.replaceChildren();
+  if (S.screen === 'lobby') app.replaceChildren(renderLobby());
+  else if (S.screen === 'room') app.replaceChildren(renderRoom());
+  else app.replaceChildren(renderGame());
+  const m = renderModal(); if (m) modal.append(m);
+}
+
+function renderLobby() {
+  const nameIn = h('input', { placeholder: '例：たろう', maxlength: 12, value: S.name, oninput: e => S.name = e.target.value, id: 'name' });
+  const codeIn = h('input', { placeholder: '6文字のコード', maxlength: 6, value: S.room, style: 'text-transform:uppercase; letter-spacing:3px', id: 'code',
+    oninput: e => S.room = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''),
+    onkeydown: e => { if (e.key === 'Enter') connect(false); } });
+  return h('div', { class: 'center-wrap' },
+    h('div', { class: 'panel' },
+      LOCAL && h('div', { style: 'text-align:center' }, h('span', { class: 'badge-local' }, 'ローカルテストモード（同じブラウザのタブ同士）')),
+      h('h1', { class: 'logo' }, 'UNYO'),
+      h('p', { class: 'sub' }, 'サーバー不要・P2Pで友達とオンライン対戦'),
+      h('div', { class: 'field' }, h('label', { for: 'name' }, 'あなたの名前'), nameIn),
+      h('button', { class: 'btn primary', style: 'width:100%', id: 'btn-host', onclick: () => connect(true) }, '部屋を作る（ホスト）'),
+      h('div', { class: 'or' }, '― または招待された部屋に参加 ―'),
+      h('div', { class: 'row' }, codeIn, h('button', { class: 'btn', id: 'btn-join', onclick: () => connect(false) }, '参加')),
+      h('p', { class: 'note' },
+        'ホストは進行役を兼ねてそのままプレイできます。マッチングはNostrリレー経由で行い、ゲームのデータはWebRTCで端末同士が直接やり取りします。',
+        h('br'), '接続には数秒〜数十秒かかることがあります。')));
+}
+
+function renderRoom() {
+  const L = S.isHost ? lobbyData() : S.lobby;
+  const connecting = S.status === 'connecting';
+  const players = L ? L.players : [];
+  const meInGame = L && L.inGame && players.some(p => p.id === S.selfId && p.inGame);
+  return h('div', { class: 'center-wrap' },
+    h('div', { class: 'panel' },
+      h('div', { style: 'text-align:center; font-size:13px; opacity:.8' }, '部屋コード'),
+      h('div', { class: 'code', id: 'room-code' }, S.room),
+      h('div', { class: 'row', style: 'justify-content:center; margin:8px 0 4px' },
+        h('button', { class: 'btn small ghost', onclick: () => copy(S.room) }, 'コードをコピー'),
+        h('button', { class: 'btn small ghost', onclick: () => copy(inviteUrl()) }, '招待リンクをコピー')),
+      connecting ? h('p', { style: 'text-align:center' }, h('span', { class: 'spinner' }), '通信の準備中…')
+        : !L ? h('p', { style: 'text-align:center' }, h('span', { class: 'spinner' }), 'ホストを探しています…', h('br'), h('small', { style: 'opacity:.7' }, 'コードが正しいか確認してください。数十秒かかることがあります。'))
+        : h('div', {},
+          h('ul', { class: 'plist', id: 'plist' }, players.map(p => h('li', {},
+            h('span', {}, p.name, p.id === L.hostId && h('span', { class: 'tag' }, 'ホスト'), p.id === S.selfId && h('span', { class: 'tag' }, 'あなた')),
+            h('span', { style: 'opacity:.7; font-size:12px' }, L.inGame ? (p.inGame ? 'プレイ中' : '次のラウンドから') : '準備OK')))),
+          S.isHost
+            ? h('button', { class: 'btn primary', style: 'width:100%', id: 'btn-start', disabled: players.length < 2, onclick: hostStart },
+              players.length < 2 ? 'あと1人以上待っています…' : `${players.length}人でゲーム開始！`)
+            : h('p', { style: 'text-align:center; opacity:.85' }, h('span', { class: 'spinner' }),
+              L.inGame && !meInGame ? 'ゲーム進行中です。次のラウンドから参加できます' : 'ホストの開始を待っています…')),
+      h('div', { style: 'text-align:center; margin-top:14px' }, h('button', { class: 'btn small ghost', onclick: leaveRoom }, '退出する'))));
+}
+
+function playerName(v, id) { return (v.players.find(p => p.id === id) || {}).name || '?'; }
+
+function renderGame() {
+  const v = S.view, me = S.selfId;
+  const myIdx = v.players.findIndex(p => p.id === me);
+  const n = v.players.length;
+  const others = [];
+  for (let k = 1; k < n; k++) others.push(v.players[(myIdx + k + n) % n]); // 自分の次から順に
+  const myTurn = v.turnId === me;
+  const playable = new Set(v.playable);
+  const canDraw = myTurn && v.phase === 'play' && v.forced === null && (v.pending > 0 || v.playable.length === 0);
+  const totals = v.totals || {};
+
+  // 手番の並び
+  const order = [];
+  let i = v.players.findIndex(p => p.id === v.turnId);
+  for (let k = 0; k < n; k++) {
+    const p = v.players[i];
+    if (p.connected) order.push(p);
+    i = (i + v.dir + n) % n;
+  }
+
+  // ステータス文
+  let status = '';
+  const curName = playerName(v, v.turnId);
+  if (v.phase === 'over') status = 'ラウンド終了';
+  else if (v.phase === 'color') status = myTurn ? '色を選んでください' : `${curName} さんが色を選んでいます…`;
+  else if (v.phase === 'seven') status = myTurn ? '手札を交換する相手を選んでください' : `${curName} さんが交換相手を選んでいます…`;
+  else if (myTurn) {
+    if (v.forced !== null) status = '引いたカードが出せます！そのカードを出してください';
+    else if (v.pending > 0) status = v.playable.length ? `ドロー4を重ねるか、${v.pending}枚引いてください` : `出せるドローカードがありません。${v.pending}枚引いてください`;
+    else if (!v.playable.length) status = '出せるカードがありません。パスしてください';
+    else status = 'あなたの番です！カードを選んでください';
+  } else status = `${curName} さんの番です`;
+
+  const seat = p => {
+    const hand = v.allHands[p.id] || [];
+    const cards = S.debug
+      ? hand.map(c => cardEl(c, { size: 'sm' }))
+      : Array.from({ length: Math.min(p.count, 14) }, () => backEl('sm'));
+    return h('div', { class: `seat ${p.id === v.turnId && v.phase !== 'over' ? 'turn' : ''} ${p.connected ? '' : 'off'}`, 'data-seat': p.id },
+      h('div', { class: 'nm' },
+        h('span', {}, p.name, !p.connected && '（切断）'),
+        h('span', { class: 'row', style: 'gap:4px' },
+          p.id === v.turnId && v.unyoDeclared && h('span', { class: 'mark y' }, 'UNYO!'),
+          p.id === v.unyoTarget && h('span', { class: 'mark' }, '宣言忘れ?'),
+          h('span', { class: 'cnt' }, `${p.count}枚`))),
+      h('div', { class: 'pts' }, `${totals[p.id] || 0} pt`),
+      h('div', { class: 'fan' }, cards, !S.debug && p.count > 14 && h('span', { class: 'more' }, `+${p.count - 14}`)));
+  };
+
+  const myCards = v.hand.map(c => {
+    const ok = playable.has(c.id);
+    return cardEl(c, {
+      playable: ok, forced: v.forced === c.id,
+      dim: myTurn && v.phase === 'play' && !ok,
+      onclick: ok ? () => act({ t: 'play', cardId: c.id }) : null,
+    });
+  });
+
+  const actions = [];
+  if (canDraw) actions.push(h('button', { class: 'btn primary', id: 'btn-draw', onclick: () => act({ t: 'draw' }) },
+    v.pending > 0 ? `${v.pending}枚引く` : 'パス（1枚引く）'));
+  if (myTurn && v.phase === 'play' && v.hand.length === 2)
+    actions.push(v.unyoDeclared
+      ? h('button', { class: 'btn', disabled: true }, 'UNYO宣言済み ✓')
+      : h('button', { class: 'btn unyo', id: 'btn-unyo', onclick: () => act({ t: 'unyo' }) }, 'UNYO!'));
+  if (v.unyoTarget && v.unyoTarget !== me && v.phase !== 'over')
+    actions.push(h('button', { class: 'btn call', id: 'btn-callout', onclick: () => act({ t: 'callout' }) },
+      `UNYO忘れ！（${playerName(v, v.unyoTarget)}）`));
+
+  return h('div', { class: 'game' },
+    h('div', { class: 'topbar' },
+      h('span', { class: 'logo' }, 'UNYO'),
+      h('span', { class: 'info' }, `部屋 ${S.room}　第${v.round}ラウンド${S.isHost ? '　（あなたが進行役）' : ''}`),
+      h('span', { class: 'sp' }),
+      h('button', { class: `btn small ${S.debug ? 'on' : 'ghost'}`, id: 'btn-debug', onclick: () => { S.debug = !S.debug; render(); } },
+        S.debug ? '🐞 手札表示中' : '🐞 全員の手札を見る'),
+      h('button', { class: 'btn small ghost', onclick: () => { S.showLog = !S.showLog; render(); } }, 'ログ'),
+      h('button', { class: 'btn small ghost', onclick: leaveRoom }, '退出')),
+    S.debug && h('div', { class: 'debugbar' }, 'デバッグ表示中：他のプレイヤーの手札が表になっています'),
+    h('div', { class: 'opps' }, others.map(seat)),
+    h('div', { class: 'table' },
+      h('div', { class: 'piles' },
+        h('div', { class: 'pile' },
+          h('div', { class: `deck ${canDraw ? 'can' : ''}`, id: 'deck', onclick: canDraw ? () => act({ t: 'draw' }) : null },
+            v.deckCount > 1 && h('div', { class: 'stack' }, backEl('lg')),
+            v.deckCount > 0 ? backEl('lg') : h('div', { class: 'card lg', style: 'background:rgba(0,0,0,.2); border-style:dashed' })),
+          h('span', {}, `山札 ${v.deckCount}枚`)),
+        h('div', { class: 'pile' },
+          h('div', { class: 'discard', id: 'discard', style: v.color ? `box-shadow:0 0 0 4px ${COLOR_HEX[v.color]}, 0 0 24px ${COLOR_HEX[v.color]}` : '' },
+            cardEl(v.top, { size: 'lg' })),
+          h('span', {}, `場 ${v.discardCount}枚`)),
+        h('div', { class: 'side' },
+          h('div', { class: 'chip' },
+            h('span', { class: 'dot', style: `background:${v.color ? COLOR_HEX[v.color] : 'conic-gradient(var(--red) 0 25%,var(--yellow) 0 50%,var(--green) 0 75%,var(--blue) 0)'}` }),
+            v.color ? `場の色：${COLOR_JA[v.color]}` : '場の色：どれでもOK'),
+          h('div', { class: 'chip' }, h('span', { style: 'font-size:18px; width:18px; text-align:center' }, v.dir === 1 ? '↻' : '↺'), v.dir === 1 ? '正回り' : '逆回り'),
+          v.pending > 0 && h('div', { class: 'pending' }, `ドロー +${v.pending}`))),
+      h('div', { class: 'order' }, '順番：', order.map((p, k) => [k > 0 && '→', h('span', { class: `o ${k === 0 ? 'cur' : ''}` }, p.name)])),
+      h('div', { class: 'status', id: 'status' }, status)),
+    h('div', { class: `me ${myTurn && v.phase !== 'over' ? 'turn' : ''}` },
+      h('div', { class: 'mehead' },
+        h('b', {}, `${S.name}（あなた）`), h('span', {}, `手札 ${v.hand.length}枚`), h('span', {}, `${totals[me] || 0} pt`),
+        myTurn && v.unyoDeclared && h('span', { class: 'mark y' }, 'UNYO!')),
+      h('div', { class: 'actions' }, actions),
+      h('div', { class: 'hand', id: 'hand' }, myCards)),
+    S.showLog && h('div', { class: 'log' },
+      h('div', { class: 'row', style: 'justify-content:space-between; margin-bottom:8px' }, h('b', {}, 'ゲームログ'),
+        h('button', { class: 'btn small ghost', onclick: () => { S.showLog = false; render(); } }, '閉じる')),
+      v.log.slice().reverse().map(l => h('div', { class: l.big ? 'b' : '' }, l.text))));
+}
+
+function renderModal() {
+  if (S.hostLost) return h('div', { class: 'overlay' }, h('div', { class: 'dialog' },
+    h('h2', {}, 'ホストとの接続が切れました'),
+    h('p', {}, 'ホストがタブを閉じたか、通信が切断されました。'),
+    h('button', { class: 'btn primary', onclick: leaveRoom }, 'トップに戻る')));
+  if (S.screen !== 'game' || !S.view) return null;
+  const v = S.view, me = S.selfId, myTurn = v.turnId === me;
+  if (v.phase === 'color' && myTurn) {
+    return h('div', { class: 'overlay' }, h('div', { class: 'dialog' },
+      h('h2', {}, '次の色を選んでください'),
+      h('div', { class: 'colors' }, COLORS.map(c =>
+        h('button', { style: `background:${COLOR_HEX[c]}`, 'data-color': c, onclick: () => act({ t: 'color', color: c }) }, COLOR_JA[c])))));
+  }
+  if (v.phase === 'seven' && myTurn) {
+    return h('div', { class: 'overlay' }, h('div', { class: 'dialog' },
+      h('h2', {}, '7：手札を交換する相手を指名'),
+      h('div', { class: 'targets' }, v.players.filter(p => p.id !== me && p.connected).map(p =>
+        h('button', { class: 'btn', 'data-target': p.id, onclick: () => act({ t: 'seven', target: p.id }) }, `${p.name}（${p.count}枚）`)))));
+  }
+  if (v.phase === 'over') {
+    const rows = v.players.slice().sort((a, b) => (v.totals[b.id] || 0) - (v.totals[a.id] || 0));
+    return h('div', { class: 'overlay' }, h('div', { class: 'dialog result' },
+      h('div', { class: 'logo', style: 'font-size:34px' }, v.winner ? 'FINISH!' : 'ROUND END'),
+      v.winner
+        ? h('h2', {}, `🎉 ${playerName(v, v.winner)} さんの勝ち！ +${v.roundScore}pt`)
+        : h('h2', {}, 'プレイヤーが足りないため終了しました'),
+      h('table', {},
+        h('tr', {}, h('th', {}, 'プレイヤー'), h('th', {}, '残り手札'), h('th', {}, '合計pt')),
+        rows.map(p => h('tr', { class: p.id === v.winner ? 'win' : '' },
+          h('td', {}, p.name, p.id === me && '（あなた）'), h('td', {}, `${p.count}枚`), h('td', {}, `${v.totals[p.id] || 0}`)))),
+      S.isHost
+        ? h('button', { class: 'btn primary', id: 'btn-next', onclick: () => act({ t: 'restart' }) }, '次のラウンドへ')
+        : h('p', {}, h('span', { class: 'spinner' }), 'ホストが次のラウンドを始めるのを待っています…'),
+      h('div', { style: 'margin-top:10px' }, h('button', { class: 'btn small ghost', onclick: leaveRoom }, '退出する'))));
+  }
+  return null;
+}
+
+render();
+if (S.room) setTimeout(() => document.getElementById('code')?.focus(), 50);
+// テスト用フック
+window.__unyo = { S, H, act, connect };
+</script>
+</body>
+</html>
