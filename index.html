@@ -14,6 +14,7 @@
 }
 *{box-sizing:border-box}
 html,body{margin:0;height:100%}
+html{background:#0a2a1e}
 body{
   font-family:'M PLUS Rounded 1c',system-ui,sans-serif; color:#f3f7f4;
   background:radial-gradient(ellipse at 50% 40%,#22704f 0%,#124532 55%,#0a2a1e 100%) fixed;
@@ -181,6 +182,18 @@ input:focus{border-color:var(--gold)}
 .rtable td:first-child{width:56px}
 .rtable td:nth-child(2){width:110px; white-space:nowrap}
 .rcount{font-size:11px; opacity:.75; font-weight:500}
+.reditor{background:rgba(0,0,0,.22); border-radius:14px; padding:12px; margin:6px 0 14px}
+.rhead{font-size:12px; opacity:.8; margin:8px 0 5px; font-weight:700}
+.rgrid{display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:6px}
+.rtoggle{display:flex; align-items:center; gap:8px; background:rgba(255,255,255,.06); border:2px solid rgba(255,255,255,.12); border-radius:12px; padding:5px 8px; color:#fff; cursor:pointer; font-family:inherit; font-weight:700; font-size:12.5px; text-align:left; transition:all .15s}
+.rtoggle .card{--w:26px}
+.rtoggle .rl{flex:1; line-height:1.3}
+.rtoggle .sw{font-size:11px; padding:1px 8px; border-radius:99px; background:rgba(255,255,255,.15); white-space:nowrap}
+.rtoggle.on{border-color:var(--gold); background:rgba(255,210,63,.14)}
+.rtoggle.on .sw{background:var(--gold); color:var(--ink)}
+.rtoggle:not(.on){opacity:.55}
+.rtoggle:not(.on) .card{filter:grayscale(1)}
+.rtoggle:disabled{cursor:default}
 .debugbar{background:rgba(255,122,162,.18); color:#ffd0de; font-size:12px; text-align:center; padding:3px}
 @media (max-width:600px){
   .card{--w:54px} .card.lg{--w:76px} .card.sm{--w:28px}
@@ -215,16 +228,34 @@ function shuffle(a) {
   }
   return a;
 }
-function buildDeck() {
+// ルールのカスタマイズ：数字以外のカードは ON/OFF、数字カードは特殊効果の ON/OFF
+const OPTIONAL_CARDS = ['skip', 'reverse', 'draw2', 'discard', 'wild', 'draw4', 'draw6', 'draw10', 'drawwild'];
+const EFFECT_NUMS = ['0', '3', '7'];
+function defaultRules() {
+  return {
+    cards: Object.fromEntries(OPTIONAL_CARDS.map(k => [k, true])),
+    effects: Object.fromEntries(EFFECT_NUMS.map(k => [k, true])),
+  };
+}
+function normRules(r) {
+  const d = defaultRules();
+  if (r && typeof r === 'object') {
+    for (const k of OPTIONAL_CARDS) if (r.cards && typeof r.cards[k] === 'boolean') d.cards[k] = r.cards[k];
+    for (const k of EFFECT_NUMS) if (r.effects && typeof r.effects[k] === 'boolean') d.effects[k] = r.effects[k];
+  }
+  return d;
+}
+function buildDeck(rules = defaultRules()) {
   const d = []; let id = 0;
   const add = (color, sym) => d.push({ id: id++, color, sym });
+  const on = sym => rules.cards[sym] !== false;
   for (const c of COLORS) {
-    for (let n = 0; n <= 9; n++) { add(c, String(n)); add(c, String(n)); } // 0〜9 各2枚
-    for (const s of ['skip', 'reverse', 'draw2', 'discard']) { add(c, s); add(c, s); } // スキップ・リバース・ドロー2・ディスカード 各2枚
+    for (let n = 0; n <= 9; n++) { add(c, String(n)); add(c, String(n)); } // 0〜9 各2枚（常に入る）
+    for (const s of ['skip', 'reverse', 'draw2', 'discard']) if (on(s)) { add(c, s); add(c, s); } // 各色2枚
   }
-  const rb = (sym, n) => { for (let i = 0; i < n; i++) add('rainbow', sym); };
+  const rb = (sym, n) => { if (on(sym)) for (let i = 0; i < n; i++) add('rainbow', sym); };
   rb('draw4', 2); rb('wild', 2); rb('draw6', 4); rb('draw10', 2); rb('drawwild', 2); // レインボー
-  return d; // 合計 124枚
+  return d; // すべてONで 124枚
 }
 
 class Game {
@@ -232,6 +263,7 @@ class Game {
     this.players = players.map(p => ({ id: p.id, name: p.name, hand: [], connected: true, burst: false }));
     this.totals = opts.totals || {};
     this.round = opts.round || 1;
+    this.rules = normRules(opts.rules);
     this.log = []; this.seq = 0;
     this.events = []; this.eseq = 0; // 演出用イベント
   }
@@ -244,7 +276,7 @@ class Game {
     if (this.log.length > 80) this.log.shift();
   }
   start() {
-    this.deck = shuffle(buildDeck());
+    this.deck = shuffle(buildDeck(this.rules));
     this.discard = [];
     for (let r = 0; r < 7; r++) for (const p of this.players) p.hand.push(this.deck.pop());
     const first = this.deck.pop();              // 最初の場のカードは山札の上から
@@ -436,7 +468,8 @@ class Game {
         this.discard.push(c);
         this.addLog(`${p.name} さんが「${cardName(c)}」を出しました` + (c.sym === 'discard' ? `（同じ色を ${dumped.length} 枚捨てた）` : ''));
         const dv = DRAW_VAL[c.sym] || 0;
-        this.emit('play', { by: pid, card: c, pending: dv ? this.pending + dv : 0, dumped: dumped.length });
+        const plain = EFFECT_NUMS.includes(c.sym) && !this.rules.effects[c.sym]; // 効果OFFの数字カード
+        this.emit('play', { by: pid, card: c, pending: dv ? this.pending + dv : 0, dumped: dumped.length, plain });
         if (before === 2 && p.hand.length === 1 && !this.unyoDeclared) this.unyoTarget = pid; // UNYO宣言忘れ
         this.unyoDeclared = false;
         if (p.hand.length === 0) { this.finish(p); return null; }
@@ -447,6 +480,7 @@ class Game {
           if (c.color === 'rainbow') this.phase = 'color'; else this.advance(1);
           return null;
         }
+        if (plain) { this.advance(1); return null; }
         switch (c.sym) {
           case 'drawwild':
             this.advance(1);
@@ -564,7 +598,7 @@ class Game {
     const me = this.byId(pid), cur = this.cur();
     const myTurn = me && cur.id === pid && this.phase === 'play';
     return {
-      round: this.round,
+      round: this.round, rules: this.rules,
       players: this.players.map(p => ({ id: p.id, name: p.name, count: p.hand.length, connected: p.connected, burst: p.burst })),
       hand: me ? me.hand : [],
       allHands: withAllHands ? Object.fromEntries(this.players.map(p => [p.id, p.hand])) : null,
@@ -584,7 +618,7 @@ class Game {
 // =====================================================================
 
 // バージョン表記 AA.BB（AA=メイン, 開発中は00 / BB=ミニ, 更新ごとに+1）
-const VERSION = '00.07';
+const VERSION = '00.08';
 const APP_ID = 'unyo-card-game-p2p-v1';
 const TRYSTERO_URLS = {
   nostr: [
@@ -685,7 +719,7 @@ const S = {
   seenE: null, fxQueue: [], fxBusyUntil: 0, threeCard: null, showRules: false,
   debug: false, showLog: false, status: '', error: '', hostLost: false, seenSeq: 0, seenRound: 0, A: null,
 };
-const H = { players: [], game: null, totals: {}, round: 1 }; // ホスト専用
+const H = { players: [], game: null, totals: {}, round: 1, rules: null }; // ホスト専用
 
 // ---------- 接続 ----------
 async function connect(asHost) {
@@ -708,6 +742,7 @@ async function connect(asHost) {
   if (asHost) {
     S.hostId = t.selfId;
     H.players = [{ id: t.selfId, name: S.name }];
+    try { H.rules = normRules(JSON.parse(store.get('unyo-rules') || 'null')); } catch { H.rules = defaultRules(); }
     t.onJoin(id => A.lobby.send(lobbyData(), id));
     A.hi.on((d, from) => hostOnHi(d, from));
     A.act.on((a, from) => hostAct(from, a));
@@ -748,7 +783,7 @@ function inviteUrl() {
 function lobbyData() {
   const inGameIds = H.game ? new Set(H.game.players.filter(p => p.connected).map(p => p.id)) : new Set();
   return {
-    hostId: S.selfId, room: S.room,
+    hostId: S.selfId, room: S.room, rules: H.rules,
     inGame: !!(H.game && H.game.phase !== 'over'),
     players: H.players.map(p => ({ id: p.id, name: p.name, inGame: inGameIds.has(p.id) })),
   };
@@ -782,7 +817,7 @@ function hostOnLeave(id) {
 }
 function hostStart() {
   if (H.players.length < 2) { toast('2人以上で開始できます', 'err'); return; }
-  H.game = new Game(H.players, { totals: H.totals, round: H.round++ });
+  H.game = new Game(H.players, { totals: H.totals, round: H.round++, rules: H.rules });
   H.game.start();
   broadcastLobby();
   broadcastState();
@@ -836,7 +871,7 @@ function playFx(list) {
   let t = Math.max(0, S.fxBusyUntil - now);
   const at = (ms, f) => setTimeout(() => { try { f(); } catch (err) { console.warn(err); } }, ms);
   for (const e of list) {
-    if (e.type === 'play' && FX_SYMS.has(e.card.sym)) {
+    if (e.type === 'play' && FX_SYMS.has(e.card.sym) && !e.plain) {
       const [a, b] = fxLabel(e);
       at(t, () => cutin(e.card, a, (S.view ? playerName(S.view, e.by) + ' さん' : '') + (b ? '　' + b : '')));
       t += 950;
@@ -954,10 +989,14 @@ function leaveRoom() {
 function render() {
   const app = document.getElementById('app');
   const modal = document.getElementById('modal');
+  // 再描画でパネルのスクロール位置が戻らないように保存
+  const keep = {};
+  for (const id of ['rules-panel', 'log-panel']) { const el = document.getElementById(id); if (el) keep[id] = el.scrollTop; }
   modal.replaceChildren();
   if (S.screen === 'lobby') app.replaceChildren(renderLobby());
   else if (S.screen === 'room') app.replaceChildren(renderRoom());
   else app.replaceChildren(renderGame());
+  for (const [id, top] of Object.entries(keep)) { const el = document.getElementById(id); if (el) el.scrollTop = top; }
   const m = renderModal(); if (m) modal.append(m);
   if (S.fxQueue.length && S.screen === 'game') {
     const q = S.fxQueue.splice(0);
@@ -988,13 +1027,45 @@ function renderLobby() {
         h('br'), '接続には数秒〜数十秒かかることがあります。')));
 }
 
+const EFFECT_SHORT = { '0': '手札まわし', '3': '1枚渡す', '7': '手札交換' };
+function setRule(group, key, val) {
+  H.rules = normRules(H.rules);
+  H.rules[group][key] = val;
+  store.set('unyo-rules', JSON.stringify(H.rules));
+  broadcastLobby(); render();
+}
+function rulesEditor(rules, editable) {
+  const deckSize = buildDeck(rules).length;
+  const tog = (group, key, label, sample, onTxt, offTxt) => {
+    const on = rules[group][key];
+    return h('button', { class: `rtoggle ${on ? 'on' : ''}`, disabled: !editable, 'data-rule': `${group}-${key}`,
+      onclick: editable ? () => setRule(group, key, !on) : null },
+      sample, h('span', { class: 'rl' }, label), h('span', { class: 'sw' }, on ? onTxt : offTxt));
+  };
+  const sampleCard = sym => cardEl({ id: -1, color: ['wild', 'draw4', 'draw6', 'draw10', 'drawwild'].includes(sym) ? 'rainbow' : 'blue', sym }, { size: 'sm' });
+  return h('div', { class: 'reditor', id: 'rule-editor' },
+    h('div', { class: 'row', style: 'justify-content:space-between; margin-bottom:6px' },
+      h('b', {}, 'ルール設定'),
+      h('span', { style: 'font-size:12px; opacity:.8' }, `山札 ${deckSize} 枚`)),
+    !editable && h('div', { class: 'note', style: 'margin:0 0 6px' }, 'ホストが設定します（見るだけ）'),
+    h('div', { class: 'rhead' }, '使うカード（数字カード 0〜9 は常に入ります）'),
+    h('div', { class: 'rgrid' }, OPTIONAL_CARDS.map(k => tog('cards', k, SYM_JA[k], sampleCard(k), 'ON', 'OFF'))),
+    h('div', { class: 'rhead' }, '数字カードの特殊効果'),
+    h('div', { class: 'rgrid' }, EFFECT_NUMS.map(k => tog('effects', k, `${k}：${EFFECT_SHORT[k]}`, sampleCard(k), '効果ON', '効果OFF'))),
+    h('div', { class: 'row', style: 'justify-content:space-between; margin-top:8px' },
+      h('button', { class: 'btn small ghost', id: 'btn-rules-room', onclick: () => { S.showRules = !S.showRules; render(); } }, 'ルール詳細を見る'),
+      editable && h('button', { class: 'btn small ghost', id: 'btn-rules-reset', onclick: () => {
+        H.rules = defaultRules(); store.set('unyo-rules', JSON.stringify(H.rules)); broadcastLobby(); render();
+      } }, 'すべて初期設定に戻す')));
+}
 function renderRoom() {
   const L = S.isHost ? lobbyData() : S.lobby;
   const connecting = S.status === 'connecting';
   const players = L ? L.players : [];
   const meInGame = L && L.inGame && players.some(p => p.id === S.selfId && p.inGame);
   return h('div', { class: 'center-wrap' },
-    h('div', { class: 'panel' },
+    S.showRules && L && renderRules(L.rules),
+    h('div', { class: 'panel', style: 'width:min(600px,100%)' },
       h('div', { style: 'text-align:center; font-size:13px; opacity:.8' }, '部屋コード'),
       h('div', { class: 'code', id: 'room-code' }, S.room),
       h('div', { class: 'row', style: 'justify-content:center; margin:8px 0 4px' },
@@ -1006,6 +1077,7 @@ function renderRoom() {
           h('ul', { class: 'plist', id: 'plist' }, players.map(p => h('li', {},
             h('span', {}, p.name, p.id === L.hostId && h('span', { class: 'tag' }, 'ホスト'), p.id === S.selfId && h('span', { class: 'tag' }, 'あなた')),
             h('span', { style: 'opacity:.7; font-size:12px' }, L.inGame ? (p.inGame ? 'プレイ中' : '次のラウンドから') : '準備OK')))),
+          rulesEditor(normRules(L.rules), S.isHost && !L.inGame),
           S.isHost
             ? h('button', { class: 'btn primary', style: 'width:100%', id: 'btn-start', disabled: players.length < 2, onclick: hostStart },
               players.length < 2 ? 'あと1人以上待っています…' : `${players.length}人でゲーム開始！`)
@@ -1145,11 +1217,11 @@ function renderGame() {
         myTurn && v.unyoDeclared && h('span', { class: 'mark y' }, 'UNYO!')),
       h('div', { class: 'actions' }, actions),
       h('div', { class: 'hand', id: 'hand' }, myCards)),
-    S.showLog && h('div', { class: 'log' },
+    S.showLog && h('div', { class: 'log', id: 'log-panel' },
       h('div', { class: 'row', style: 'justify-content:space-between; margin-bottom:8px' }, h('b', {}, 'ゲームログ'),
         h('button', { class: 'btn small ghost', onclick: () => { S.showLog = false; render(); } }, '閉じる')),
       v.log.slice().reverse().map(l => h('div', { class: l.big ? 'b' : '' }, l.text))),
-    S.showRules && renderRules());
+    S.showRules && renderRules(v.rules));
 }
 
 // ---------- ルール説明パネル ----------
@@ -1170,16 +1242,17 @@ const CARD_INFO = [
   ['draw10', '次の人は10枚引きます。ドロー10を重ねられます。出した人が次の色を選びます。'],
   ['drawwild', '次の人は色を1つ宣言し、山札を1枚ずつめくります。宣言した色かレインボーが出たら、そのカードを場に出して番が終わります（そのカードの効果は発動しません）。ほかのドロー系カードは重ねられません。'],
 ];
-function deckCounts() {
+function deckCounts(rules) {
   const m = {};
-  for (const c of buildDeck()) {
+  for (const c of buildDeck(normRules(rules))) {
     const k = m[c.sym] || (m[c.sym] = { total: 0, colors: new Set() });
     k.total++; k.colors.add(c.color);
   }
   return m;
 }
-function renderRules() {
-  const cnt = deckCounts();
+function renderRules(rules) {
+  rules = normRules(rules);
+  const cnt = deckCounts(rules);
   const total = Object.values(cnt).reduce((s, k) => s + k.total, 0);
   const sample = sym => cardEl({ id: -1, color: cnt[sym].colors.has('rainbow') ? 'rainbow' : 'red', sym }, { size: 'sm2' });
   const countText = sym => {
@@ -1220,7 +1293,9 @@ function renderRules() {
         CARD_INFO.filter(([sym]) => cnt[sym]).map(([sym, desc]) => h('tr', {},
           h('td', {}, sample(sym)),
           h('td', {}, h('b', {}, SYM_JA[sym] ?? sym), h('div', { class: 'rcount' }, countText(sym))),
-          h('td', {}, desc))))));
+          h('td', {}, EFFECT_NUMS.includes(sym) && !rules.effects[sym] ? '効果なし（このゲームでは特殊効果OFF）' : desc)))),
+      OPTIONAL_CARDS.some(k => !rules.cards[k]) && h('p', { style: 'font-size:12px; opacity:.75' },
+        'このゲームで使わないカード：', OPTIONAL_CARDS.filter(k => !rules.cards[k]).map(k => SYM_JA[k]).join('、'))));
 }
 
 function renderModal() {
