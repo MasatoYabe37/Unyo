@@ -195,8 +195,11 @@ input:focus{border-color:var(--gold)}
 .rtoggle:not(.on) .card{filter:grayscale(1)}
 .rtoggle:disabled{cursor:default}
 .rcount-row{cursor:default}
+.nums{display:grid; grid-template-columns:repeat(5,1fr); gap:10px}
+.nums .btn{font-family:'Dela Gothic One',sans-serif; font-size:24px; padding:12px 0}
 .rgrid.wide{grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}
-.rgrid.wide .rl{white-space:nowrap}
+.rgrid.wide .rl{min-width:0; word-break:keep-all; overflow-wrap:anywhere}
+.stepper{flex:none}
 .stepper{display:flex; align-items:center; gap:4px}
 .stp{width:24px; height:24px; border-radius:50%; border:none; background:#fff; color:var(--ink); font-weight:800; font-size:15px; line-height:1; cursor:pointer; padding:0}
 .stp:disabled{opacity:.3; cursor:default}
@@ -223,7 +226,7 @@ input:focus{border-color:var(--gold)}
 // =====================================================================
 const COLORS = ['red', 'blue', 'yellow', 'green'];
 const COLOR_JA = { red: '赤', blue: '青', yellow: '黄', green: '緑', rainbow: 'レインボー' };
-const SYM_JA = { skip: 'スキップ', reverse: 'リバース', draw2: 'ドロー2', draw4: 'ドロー4', draw6: 'ドロー6', draw10: 'ドロー10', wild: 'ワイルド', drawwild: 'ドローワイルド', discard: 'ディスカード' };
+const SYM_JA = { skip: 'スキップ', reverse: 'リバース', draw2: 'ドロー2', draw4: 'ドロー4', draw6: 'ドロー6', draw10: 'ドロー10', wild: 'ワイルド', drawwild: 'ドローワイルド', drawasc: 'ドローワイルズアセンダンス', discard: 'ディスカード' };
 const DRAW_VAL = { draw2: 2, draw4: 4, draw6: 6, draw10: 10 }; // 重ねられるドロー系カード
 function cardName(c) {
   if (c.color === 'rainbow') return SYM_JA[c.sym];
@@ -238,8 +241,8 @@ function shuffle(a) {
 }
 // ルールのカスタマイズ：色つき特殊カードは ON/OFF、レインボーカードは枚数(0〜10)、数字カードは特殊効果の ON/OFF
 const COLOR_OPTIONAL = ['skip', 'reverse', 'draw2', 'discard'];
-const RAINBOW_CARDS = ['wild', 'draw4', 'draw6', 'draw10', 'drawwild'];
-const RAINBOW_DEFAULT = { wild: 2, draw4: 2, draw6: 4, draw10: 2, drawwild: 2 };
+const RAINBOW_CARDS = ['wild', 'draw4', 'draw6', 'draw10', 'drawwild', 'drawasc'];
+const RAINBOW_DEFAULT = { wild: 2, draw4: 2, draw6: 4, draw10: 2, drawwild: 2, drawasc: 2 };
 const RAINBOW_MAX = 10;
 const OPTIONAL_CARDS = [...COLOR_OPTIONAL, ...RAINBOW_CARDS];
 const EFFECT_NUMS = ['0', '3', '7'];
@@ -248,6 +251,7 @@ function defaultRules() {
     cards: Object.fromEntries(COLOR_OPTIONAL.map(k => [k, true])),
     counts: { ...RAINBOW_DEFAULT },
     effects: Object.fromEntries(EFFECT_NUMS.map(k => [k, true])),
+    options: { stackSame: true }, // 同じ数字の重ね出し
   };
 }
 function normRules(r) {
@@ -260,6 +264,7 @@ function normRules(r) {
       else if (r.cards && r.cards[k] === false) d.counts[k] = 0; // 旧バージョンの設定(ON/OFF)
     }
     for (const k of EFFECT_NUMS) if (r.effects && typeof r.effects[k] === 'boolean') d.effects[k] = r.effects[k];
+    if (r.options && typeof r.options.stackSame === 'boolean') d.options.stackSame = r.options.stackSame;
   }
   return d;
 }
@@ -304,6 +309,9 @@ class Game {
     this.pending = 0;          // ドロー系の累積枚数
     this.pendingMin = 0;       // 重ねるのに必要な最小のドロー値
     this.dw = null;            // ドローワイルド進行中 {by, color, count}
+    this.asc = null;           // アセンダンス進行中 {by, num, count}
+    this.ascNext = false;      // 色選択のあとアセンダンスに入るか
+    this.chainSym = null; this.chainCount = 0; // 同じ数字の重ね出し
     this.phase = 'play';       // play | color | seven | three | dwcolor | dwdraw | over
     this.forced = null;        // パスで引いたカードが出せる場合、そのカードID
     this.unyoDeclared = false; // 現在の手番プレイヤーがUNYO宣言済みか
@@ -343,7 +351,7 @@ class Game {
   voidGame() {
     if (this.phase === 'over') return;
     this.phase = 'over'; this.winner = null; this.voided = true; this.roundScore = 0;
-    this.pending = 0; this.pendingMin = 0; this.dw = null; this.forced = null; this.unyoTarget = null;
+    this.pending = 0; this.pendingMin = 0; this.dw = null; this.asc = null; this.forced = null; this.unyoTarget = null;
     this.endReason = '山札が無くなったため無効試合です';
     this.addLog('山札が完全に無くなりました。このラウンドは無効試合です', true);
     this.emit('void', {});
@@ -376,7 +384,7 @@ class Game {
     this.addLog('全員が次の人へ手札を渡しました！', true);
   }
   finish(p, reason = '') {
-    this.phase = 'over'; this.winner = p.id; this.pending = 0; this.pendingMin = 0; this.unyoTarget = null; this.dw = null;
+    this.phase = 'over'; this.winner = p.id; this.pending = 0; this.pendingMin = 0; this.unyoTarget = null; this.dw = null; this.asc = null;
     this.endReason = reason;
     // 他プレイヤーの手札 × 10pt、バーストしたプレイヤーは 300pt
     this.roundScore = this.players.filter(q => q.id !== p.id).reduce((s, q) => s + (q.burst ? 300 : q.hand.length * 10), 0);
@@ -403,6 +411,7 @@ class Game {
     if (alive.length < 2) { this.endShort(); return; }
     if (curBurst) {
       if (this.dw) { this.color = this.dw.color || this.color; this.dw = null; }
+      this.asc = null; this.chainSym = null; this.chainCount = 0;
       this.forced = null; this.pending = 0; this.pendingMin = 0;
       this.advance(1);
     }
@@ -422,8 +431,11 @@ class Game {
     if (this.activeCount() < 2) { this.endShort(); return; }
     if (this.cur().id === pid) {
       if (this.phase === 'color') {
+        this.ascNext = false;
         this.color = COLORS[Math.floor(Math.random() * 4)];
         this.addLog(`色はランダムで「${COLOR_JA[this.color]}」になりました`);
+      } else if (this.phase === 'ascnum' || this.phase === 'ascdraw' || this.phase === 'chain') {
+        this.asc = null; this.chainSym = null; this.chainCount = 0;
       } else if (this.phase === 'dwcolor' || this.phase === 'dwdraw') {
         this.color = (this.dw && this.dw.color) || COLORS[Math.floor(Math.random() * 4)];
         this.dw = null;
@@ -434,6 +446,20 @@ class Game {
     }
   }
 
+  // 数字カード（0・3・7）の効果。重ね出しのときは最後に1回だけ発動
+  numberEffect(p, c) {
+    const n = this.chainCount || 1;
+    this.phase = 'play'; this.chainSym = null; this.chainCount = 0;
+    if (n > 1) this.addLog(`同じ数字を ${n} 枚重ねて出しました`, true);
+    const eff = EFFECT_NUMS.includes(c.sym) && this.rules.effects[c.sym];
+    if (eff || n > 1) this.emit('play', { by: p.id, card: c, pending: 0, dumped: 0, plain: !eff, chain: n });
+    const others = this.players.filter(q => q.id !== p.id && this.isActive(q));
+    if (eff && c.sym === '7' && others.length) { this.phase = 'seven'; return null; }
+    if (eff && c.sym === '3' && others.length) { this.phase = 'three'; return null; }
+    if (eff && c.sym === '0') this.rotateHands();
+    this.advance(1);
+    return null;
+  }
   // 操作を検証して適用する。エラー時はメッセージ文字列を返す
   handle(pid, a) {
     const err = this.apply(pid, a);
@@ -449,9 +475,10 @@ class Game {
     const others = () => this.players.filter(q => q.id !== pid && this.isActive(q));
     switch (a && a.t) {
       case 'unyo': {
-        if (!isCur || this.phase !== 'play') return 'あなたの番ではありません';
+        if (!isCur || (this.phase !== 'play' && this.phase !== 'chain')) return 'あなたの番ではありません';
         if (p.hand.length !== 2) return 'UNYOは手札が2枚のときに宣言できます';
-        if (!p.hand.some(c => this.canPlay(c) && (this.forced === null || c.id === this.forced))) return '出せるカードがないのでUNYO宣言はできません';
+        const canAny = this.phase === 'chain' ? p.hand.some(c => c.sym === this.chainSym) : p.hand.some(c => this.canPlay(c) && (this.forced === null || c.id === this.forced));
+        if (!canAny) return '出せるカードがないのでUNYO宣言はできません';
         if (!this.unyoDeclared) { this.unyoDeclared = true; this.addLog(`${p.name}「UNYO！」`, true); }
         return null;
       }
@@ -466,12 +493,17 @@ class Game {
       }
       case 'play': {
         if (!isCur) return 'あなたの番ではありません';
-        if (this.phase !== 'play') return '選択を完了してください';
+        const inChain = this.phase === 'chain';
+        if (this.phase !== 'play' && !inChain) return '選択を完了してください';
         const idx = p.hand.findIndex(c => c.id === a.cardId);
         if (idx < 0) return 'そのカードは持っていません';
         const c = p.hand[idx];
-        if (this.forced !== null && c.id !== this.forced) return '引いたカードを出さなければいけません';
-        if (!this.canPlay(c)) return this.pending > 0 ? `ドロー${this.pendingMin}以上を重ねるか、カードを引いてください` : 'そのカードは出せません';
+        if (inChain) {
+          if (c.sym !== this.chainSym) return `重ねて出せるのは「${this.chainSym}」のカードだけです`;
+        } else {
+          if (this.forced !== null && c.id !== this.forced) return '引いたカードを出さなければいけません';
+          if (!this.canPlay(c)) return this.pending > 0 ? `ドロー${this.pendingMin}以上を重ねるか、カードを引いてください` : 'そのカードは出せません';
+        }
         const before = p.hand.length;
         this.unyoTarget = null;               // 次の人がカードを出したら UNYO忘れ は時効
         p.hand.splice(idx, 1); this.forced = null;
@@ -483,21 +515,30 @@ class Game {
           this.discard.push(...dumped);
         }
         this.discard.push(c);
-        this.addLog(`${p.name} さんが「${cardName(c)}」を出しました` + (c.sym === 'discard' ? `（同じ色を ${dumped.length} 枚捨てた）` : ''));
+        const isNum = /^\d$/.test(c.sym);
+        this.chainCount = inChain ? this.chainCount + 1 : 1;
+        this.addLog(`${p.name} さんが「${cardName(c)}」を${inChain ? '重ねて' : ''}出しました` + (c.sym === 'discard' ? `（同じ色を ${dumped.length} 枚捨てた）` : ''));
         const dv = DRAW_VAL[c.sym] || 0;
-        const plain = EFFECT_NUMS.includes(c.sym) && !this.rules.effects[c.sym]; // 効果OFFの数字カード
-        this.emit('play', { by: pid, card: c, pending: dv ? this.pending + dv : 0, dumped: dumped.length, plain });
+        // 数字カードの演出は効果の発動時（重ね出しの終了時）にまとめて出す
+        this.emit('play', { by: pid, card: c, pending: dv ? this.pending + dv : 0, dumped: dumped.length, plain: isNum });
         if (before === 2 && p.hand.length === 1 && !this.unyoDeclared) this.unyoTarget = pid; // UNYO宣言忘れ
         this.unyoDeclared = false;
-        if (p.hand.length === 0) { this.finish(p); return null; }
+        if (p.hand.length === 0) { this.chainSym = null; this.finish(p); return null; }
         if (c.color !== 'rainbow') this.color = c.color;
+        if (isNum) {
+          // 同じ数字の重ね出し
+          if (this.rules.options.stackSame && p.hand.some(x => x.sym === c.sym)) {
+            this.phase = 'chain'; this.chainSym = c.sym;
+            return null;
+          }
+          return this.numberEffect(p, c);
+        }
         if (dv) {
           this.pending += dv; this.pendingMin = dv;
           this.addLog(`ドロー${dv}！ 合計 ${this.pending} 枚`, true);
           if (c.color === 'rainbow') this.phase = 'color'; else this.advance(1);
           return null;
         }
-        if (plain) { this.advance(1); return null; }
         switch (c.sym) {
           case 'drawwild':
             this.advance(1);
@@ -505,16 +546,11 @@ class Game {
             this.phase = 'dwcolor';
             this.addLog(`ドローワイルド！ ${this.cur().name} さんは色を宣言して、その色が出るまでめくります`, true);
             break;
+          case 'drawasc':
+            this.ascNext = true; this.phase = 'color'; // 出した人が色を選んでから、次の人が数字を宣言
+            break;
           case 'wild':
             this.phase = 'color'; break;
-          case '7':
-            if (others().length) this.phase = 'seven'; else this.advance(1);
-            break;
-          case '3':
-            if (others().length) this.phase = 'three'; else this.advance(1);
-            break;
-          case '0':
-            this.rotateHands(); this.advance(1); break;
           case 'skip':
             this.addLog(`${this.players[this.nextIdx(this.turn, 1)].name} さんはスキップ！`, true);
             this.advance(2); break;
@@ -533,12 +569,42 @@ class Game {
         }
         return null;
       }
+      case 'chainend': {
+        if (!isCur || this.phase !== 'chain') return '重ね出しの途中ではありません';
+        return this.numberEffect(p, this.top());
+      }
       case 'color': {
         if (!isCur || this.phase !== 'color') return '色を選ぶタイミングではありません';
         if (!COLORS.includes(a.color)) return '不正な色です';
         this.color = a.color;
         this.addLog(`${p.name} さんが色を「${COLOR_JA[a.color]}」に指定`, true);
         this.advance(1);
+        if (this.ascNext) {
+          this.ascNext = false;
+          this.asc = { by: pid, num: null, count: 0 };
+          this.phase = 'ascnum';
+          this.addLog(`ドローワイルズアセンダンス！ ${this.cur().name} さんは数字を宣言して、その数字が出るまでドローします`, true);
+        }
+        return null;
+      }
+      case 'ascnum': {
+        if (!isCur || this.phase !== 'ascnum') return '数字を宣言するタイミングではありません';
+        const num = String(a.num);
+        if (!/^\d$/.test(num)) return '0〜9の数字を選んでください';
+        this.asc.num = num; this.phase = 'ascdraw';
+        this.addLog(`${p.name} さんは「${num}」を宣言！ ${num} が出るまでドローします`, true);
+        return null;
+      }
+      case 'ascdraw': {
+        if (!isCur || this.phase !== 'ascdraw') return 'ドローするタイミングではありません';
+        const [c] = this.drawCards(p, 1);
+        if (!c) return null; // 山札切れ → 無効試合
+        this.asc.count++;
+        if (c.sym === this.asc.num) {
+          this.addLog(`${p.name} さんは ${this.asc.count} 枚目で「${cardName(c)}」を引き当てました（手札に加えて番を終了）`, true);
+          this.emit('aschit', { pid, card: c, count: this.asc.count });
+          this.asc = null; this.unyoTarget = null; this.advance(1);
+        } else this.addLog(`${p.name} さん「${cardName(c)}」…はずれ（${this.asc.count} 枚目）`);
         return null;
       }
       case 'seven': {
@@ -613,7 +679,7 @@ class Game {
   // 各プレイヤーに送る画面用データ（allHands はデバッグ表示用）
   view(pid, withAllHands = false) {
     const me = this.byId(pid), cur = this.cur();
-    const myTurn = me && cur.id === pid && this.phase === 'play';
+    const myTurn = me && cur.id === pid && (this.phase === 'play' || this.phase === 'chain');
     return {
       round: this.round, rules: this.rules,
       players: this.players.map(p => ({ id: p.id, name: p.name, count: p.hand.length, connected: p.connected, burst: p.burst })),
@@ -627,7 +693,10 @@ class Game {
       log: this.log.slice(-50), seq: this.seq,
       winner: this.winner, roundScore: this.roundScore, totals: { ...this.totals },
       voided: this.voided, endReason: this.endReason,
-      playable: myTurn ? me.hand.filter(c => this.canPlay(c) && (this.forced === null || c.id === this.forced)).map(c => c.id) : [],
+      asc: this.asc ? { ...this.asc } : null, chainSym: this.chainSym, chainCount: this.chainCount,
+      playable: !myTurn ? [] : this.phase === 'chain'
+        ? me.hand.filter(c => c.sym === this.chainSym).map(c => c.id)
+        : me.hand.filter(c => this.canPlay(c) && (this.forced === null || c.id === this.forced)).map(c => c.id),
     };
   }
 }
@@ -635,7 +704,7 @@ class Game {
 // =====================================================================
 
 // バージョン表記 AA.BB（AA=メイン, 開発中は00 / BB=ミニ, 更新ごとに+1）
-const VERSION = '00.09';
+const VERSION = '00.11';
 const APP_ID = 'unyo-card-game-p2p-v1';
 const TRYSTERO_URLS = {
   nostr: [
@@ -821,7 +890,7 @@ function hostOnHi(d, from) {
     if (H.game && H.game.phase !== 'over') S.A.err.send('ゲーム進行中です。次のラウンドから参加できます', from);
   }
   broadcastLobby();
-  if (H.game && H.game.byId(from)) S.A.st.send(H.game.view(from), from);
+  if (H.game) S.A.st.send(H.game.view(from, canSeeAll(H.game, from)), from);
   render();
 }
 function hostOnLeave(id) {
@@ -839,13 +908,23 @@ function hostStart() {
   broadcastLobby();
   broadcastState();
 }
+// 全員の手札が見られるのは：ホスト(デバッグ用)・バーストした人・観戦者(このラウンドに参加していない人)
+function canSeeAll(g, pid) {
+  if (pid === S.selfId) return true;
+  const p = g.byId(pid);
+  return !p || p.burst;
+}
 function broadcastState() {
   const g = H.game; if (!g) return;
   for (const p of g.players) {
     if (p.id === S.selfId) continue;
-    if (p.connected) S.A.st.send(g.view(p.id), p.id);
+    if (p.connected) S.A.st.send(g.view(p.id, canSeeAll(g, p.id)), p.id);
   }
-  setView(g.view(S.selfId, true)); S.screen = 'game'; // 手札の確認はホストだけ
+  for (const p of H.players) { // 観戦者（途中参加で次のラウンド待ちの人）
+    if (p.id === S.selfId || g.byId(p.id)) continue;
+    S.A.st.send(g.view(p.id, true), p.id);
+  }
+  setView(g.view(S.selfId, true)); S.screen = 'game';
   render();
 }
 function hostAct(pid, a) {
@@ -875,12 +954,13 @@ function setView(v) {
 }
 
 // ---------- 演出 ----------
-const FX_SYMS = new Set(['0', '3', '7', 'discard', 'skip', 'reverse', 'draw2', 'draw4', 'draw6', 'draw10', 'wild', 'drawwild']);
-const FX_LABEL = { '0': '手札まわし！', '3': 'カードを渡す！', discard: 'ディスカード！', '7': '手札交換！', skip: 'スキップ！', reverse: 'リバース！', wild: 'ワイルド！', drawwild: 'ドローワイルド！' };
+const FX_SYMS = new Set(['0', '3', '7', 'discard', 'skip', 'reverse', 'draw2', 'draw4', 'draw6', 'draw10', 'wild', 'drawwild', 'drawasc']);
+const FX_LABEL = { '0': '手札まわし！', '3': 'カードを渡す！', discard: 'ディスカード！', '7': '手札交換！', skip: 'スキップ！', reverse: 'リバース！', wild: 'ワイルド！', drawwild: 'ドローワイルド！', drawasc: 'アセンダンス！' };
 function fxLabel(e) {
   const dv = DRAW_VAL[e.card.sym];
   if (dv) return [`ドロー${dv}！`, e.pending > dv ? `重ねて合計 +${e.pending}` : ''];
   if (e.card.sym === 'discard') return [FX_LABEL.discard, `同じ色を ${e.dumped || 0} 枚捨てた`];
+  if (e.chain > 1) return [e.plain || !FX_LABEL[e.card.sym] ? `${e.card.sym} × ${e.chain}！` : FX_LABEL[e.card.sym], `同じ数字を ${e.chain} 枚重ね出し`];
   return [FX_LABEL[e.card.sym], ''];
 }
 function playFx(list) {
@@ -888,9 +968,12 @@ function playFx(list) {
   let t = Math.max(0, S.fxBusyUntil - now);
   const at = (ms, f) => setTimeout(() => { try { f(); } catch (err) { console.warn(err); } }, ms);
   for (const e of list) {
-    if (e.type === 'play' && FX_SYMS.has(e.card.sym) && !e.plain) {
+    if (e.type === 'play' && ((FX_SYMS.has(e.card.sym) && !e.plain) || e.chain > 1)) {
       const [a, b] = fxLabel(e);
       at(t, () => cutin(e.card, a, (S.view ? playerName(S.view, e.by) + ' さん' : '') + (b ? '　' + b : '')));
+      t += 950;
+    } else if (e.type === 'aschit') {
+      at(t, () => cutin(e.card, 'ヒット！', `${S.view ? playerName(S.view, e.pid) : ''} さん ${e.count} 枚目（手札へ）`));
       t += 950;
     } else if (e.type === 'dwhit') {
       at(t, () => cutin(e.card, 'ヒット！', `${S.view ? playerName(S.view, e.pid) : ''} さん ${e.count} 枚目`));
@@ -972,7 +1055,7 @@ function h(tag, props, ...kids) {
   }
   return el;
 }
-const SYM_LABEL = { skip: '⊘', reverse: '⇄', draw2: '+2', draw4: '+4', draw6: '+6', draw10: '+10', wild: '★', drawwild: '+?', discard: '⇊' };
+const SYM_LABEL = { skip: '⊘', reverse: '⇄', draw2: '+2', draw4: '+4', draw6: '+6', draw10: '+10', wild: '★', drawwild: '+?', drawasc: '+#', discard: '⇊' };
 function cardEl(c, o = {}) {
   const lab = SYM_LABEL[c.sym] ?? c.sym;
   const ul = c.sym === '6' || c.sym === '9';
@@ -1059,7 +1142,7 @@ function rulesEditor(rules, editable) {
       onclick: editable ? () => setRule(group, key, !on) : null },
       sample, h('span', { class: 'rl' }, label), h('span', { class: 'sw' }, on ? onTxt : offTxt));
   };
-  const sampleCard = sym => cardEl({ id: -1, color: ['wild', 'draw4', 'draw6', 'draw10', 'drawwild'].includes(sym) ? 'rainbow' : 'blue', sym }, { size: 'sm' });
+  const sampleCard = sym => cardEl({ id: -1, color: RAINBOW_CARDS.includes(sym) ? 'rainbow' : 'blue', sym }, { size: 'sm' });
   return h('div', { class: 'reditor', id: 'rule-editor' },
     h('div', { class: 'row', style: 'justify-content:space-between; margin-bottom:6px' },
       h('b', {}, 'ルール設定'),
@@ -1078,6 +1161,8 @@ function rulesEditor(rules, editable) {
           h('span', { class: 'stn', 'data-num': k }, `${n}枚`),
           editable && h('button', { class: 'stp', 'data-step': `${k}-plus`, disabled: n >= RAINBOW_MAX, onclick: () => step(1) }, '+')));
     })),
+    h('div', { class: 'rhead' }, '追加ルール'),
+    h('div', { class: 'rgrid wide' }, tog('options', 'stackSame', '同じ数字の重ね出し', sampleCard('5'), 'ON', 'OFF')),
     h('div', { class: 'rhead' }, '数字カードの特殊効果'),
     h('div', { class: 'rgrid' }, EFFECT_NUMS.map(k => tog('effects', k, `${k}：${EFFECT_SHORT[k]}`, sampleCard(k), '効果ON', '効果OFF'))),
     h('div', { class: 'row', style: 'justify-content:space-between; margin-top:8px' },
@@ -1132,7 +1217,11 @@ function renderGame() {
   const myIdx = v.players.findIndex(p => p.id === me);
   const n = v.players.length;
   const others = [];
-  for (let k = 1; k < n; k++) others.push(v.players[(myIdx + k + n) % n]); // 自分の次から順に
+  if (myIdx < 0) others.push(...v.players); // 観戦者
+  else for (let k = 1; k < n; k++) others.push(v.players[(myIdx + k + n) % n]); // 自分の次から順に
+  const spectator = myIdx < 0;
+  const isOut = spectator || v.players[myIdx].burst; // 観戦中・バースト → 全員の手札が見える
+  const showAll = !!v.allHands && (isOut || (S.debug && S.isHost));
   const myTurn = v.turnId === me;
   const playable = new Set(v.playable);
   const canDraw = myTurn && v.phase === 'play' && v.forced === null; // 出せるカードがあってもパスできる
@@ -1152,8 +1241,14 @@ function renderGame() {
   const curName = playerName(v, v.turnId);
   const meP = v.players.find(p => p.id === me);
   if (v.phase === 'over') status = v.voided ? '無効試合' : 'ラウンド終了';
+  else if (!meP) status = `👀 観戦中（${curName} さんの番）`;
   else if (meP && meP.burst) status = `💥 バーストしました。このラウンドは観戦です（${curName} さんの番）`;
   else if (v.phase === 'color') status = myTurn ? '色を選んでください' : `${curName} さんが色を選んでいます…`;
+  else if (v.phase === 'chain') status = myTurn ? `同じ数字「${v.chainSym}」を続けて出せます。出し終わったら「出し終わる」を押してください` : `${curName} さんが「${v.chainSym}」を重ねて出しています…`;
+  else if (v.phase === 'ascnum') status = myTurn ? 'アセンダンス！宣言する数字を選んでください' : `${curName} さんが数字を宣言しています…（アセンダンス）`;
+  else if (v.phase === 'ascdraw') status = myTurn
+    ? `「${v.asc.num}」が出るまでドローしてください（${v.asc.count}枚ドロー済み）`
+    : `${curName} さんが「${v.asc.num}」が出るまでドローしています…（${v.asc.count}枚目）`;
   else if (v.phase === 'dwcolor') status = myTurn ? 'ドローワイルド！宣言する色を選んでください' : `${curName} さんが色を宣言しています…（ドローワイルド）`;
   else if (v.phase === 'dwdraw') status = myTurn
     ? `「${COLOR_JA[v.dw.color]}」かレインボーが出るまで、山札をめくってください（${v.dw.count}枚めくり済み）`
@@ -1169,7 +1264,7 @@ function renderGame() {
 
   const seat = p => {
     const hand = (v.allHands && v.allHands[p.id]) || [];
-    const cards = S.debug && S.isHost
+    const cards = showAll
       ? hand.map(c => cardEl(c, { size: 'sm' }))
       : Array.from({ length: Math.min(p.count, 14) }, () => backEl('sm'));
     return h('div', { class: `seat ${p.id === v.turnId && v.phase !== 'over' ? 'turn' : ''} ${p.connected && !p.burst ? '' : 'off'}`, 'data-seat': p.id },
@@ -1187,18 +1282,21 @@ function renderGame() {
     const ok = playable.has(c.id);
     return cardEl(c, {
       playable: ok, forced: v.forced === c.id,
-      dim: myTurn && v.phase === 'play' && !ok,
+      dim: myTurn && (v.phase === 'play' || v.phase === 'chain') && !ok,
       onclick: ok ? () => act({ t: 'play', cardId: c.id }) : null,
     });
   });
 
   const dwDraw = myTurn && v.phase === 'dwdraw';
+  const ascDraw = myTurn && v.phase === 'ascdraw';
   const actions = [];
   if (dwDraw) actions.push(h('button', { class: 'btn primary', id: 'btn-dwdraw', onclick: () => act({ t: 'dwdraw' }) }, '1枚めくる'));
+  if (ascDraw) actions.push(h('button', { class: 'btn primary', id: 'btn-ascdraw', onclick: () => act({ t: 'ascdraw' }) }, '1枚ドロー'));
+  if (myTurn && v.phase === 'chain') actions.push(h('button', { class: 'btn primary', id: 'btn-chainend', onclick: () => act({ t: 'chainend' }) }, '出し終わる'));
   const zone = [];
   if (canDraw) actions.push(h('button', { class: 'btn primary', id: 'btn-draw', onclick: () => act({ t: 'draw' }) },
     v.pending > 0 ? `${v.pending}枚引く` : 'パス（1枚引く）'));
-  if (myTurn && v.phase === 'play' && v.hand.length === 2 && v.playable.length > 0)
+  if (myTurn && (v.phase === 'play' || v.phase === 'chain') && v.hand.length === 2 && v.playable.length > 0)
     zone.push(v.unyoDeclared
       ? h('button', { class: 'btn', disabled: true }, 'UNYO宣言済み ✓')
       : h('button', { class: 'btn unyo', id: 'btn-unyo', onclick: () => act({ t: 'unyo' }) }, 'UNYO!'));
@@ -1216,12 +1314,13 @@ function renderGame() {
       h('button', { class: `btn small ${S.showRules ? 'on' : 'ghost'}`, id: 'btn-rules', onclick: () => { S.showRules = !S.showRules; S.showLog = false; render(); } }, 'ルール'),
       h('button', { class: 'btn small ghost', id: 'btn-log', onclick: () => { S.showLog = !S.showLog; S.showRules = false; render(); } }, 'ログ'),
       h('button', { class: 'btn small ghost', onclick: leaveRoom }, '退出')),
-    S.debug && S.isHost && h('div', { class: 'debugbar' }, 'デバッグ表示中：他のプレイヤーの手札が表になっています'),
+    isOut ? h('div', { class: 'debugbar', style: 'background:rgba(120,170,255,.18); color:#d6e6ff' }, '👀 観戦モード：全員の手札が表になっています')
+      : S.debug && S.isHost && h('div', { class: 'debugbar' }, 'デバッグ表示中：他のプレイヤーの手札が表になっています'),
     h('div', { class: 'opps' }, others.map(seat)),
     h('div', { class: 'table' },
       h('div', { class: 'piles' },
         h('div', { class: 'pile' },
-          h('div', { class: `deck ${canDraw || dwDraw ? 'can' : ''}`, id: 'deck', onclick: canDraw ? () => act({ t: 'draw' }) : dwDraw ? () => act({ t: 'dwdraw' }) : null },
+          h('div', { class: `deck ${canDraw || dwDraw || ascDraw ? 'can' : ''}`, id: 'deck', onclick: canDraw ? () => act({ t: 'draw' }) : dwDraw ? () => act({ t: 'dwdraw' }) : ascDraw ? () => act({ t: 'ascdraw' }) : null },
             v.deckCount > 1 && h('div', { class: 'stack' }, backEl('lg')),
             v.deckCount > 0 ? backEl('lg') : h('div', { class: 'card lg', style: 'background:rgba(0,0,0,.2); border-style:dashed' })),
           h('span', {}, `山札 ${v.deckCount}枚`)),
@@ -1234,12 +1333,15 @@ function renderGame() {
             h('span', { class: 'dot', style: `background:${v.color ? COLOR_HEX[v.color] : 'conic-gradient(var(--red) 0 25%,var(--yellow) 0 50%,var(--green) 0 75%,var(--blue) 0)'}` }),
             v.color ? `場の色：${COLOR_JA[v.color]}` : '場の色：どれでもOK'),
           h('div', { class: 'chip' }, h('span', { style: 'font-size:18px; width:18px; text-align:center' }, v.dir === 1 ? '↻' : '↺'), v.dir === 1 ? '正回り' : '逆回り'),
+          v.asc && v.asc.num !== null && h('div', { class: 'chip' }, h('span', { class: 'dot', style: 'background:#fff; color:#000; display:grid; place-items:center; font-size:11px; font-weight:800' }, v.asc.num), `宣言：${v.asc.num}（${v.asc.count}枚目）`),
           v.dw && v.dw.color && h('div', { class: 'chip' }, h('span', { class: 'dot', style: `background:${COLOR_HEX[v.dw.color]}` }), `宣言：${COLOR_JA[v.dw.color]}（${v.dw.count}枚目）`),
           v.pending > 0 && h('div', { class: 'pending' }, `ドロー +${v.pending}`))),
       h('div', { class: 'order' }, '順番：', order.map((p, k) => [k > 0 && '→', h('span', { class: `o ${k === 0 ? 'cur' : ''}` }, p.name)])),
       h('div', { class: 'status', id: 'status' }, status)),
-    zone.length > 0 && h('div', { class: 'unyo-zone' }, zone),
-    h('div', { class: `me ${myTurn && v.phase !== 'over' ? 'turn' : ''}`, 'data-seat': me },
+    !isOut && zone.length > 0 && h('div', { class: 'unyo-zone' }, zone),
+    spectator ? h('div', { class: 'me', style: 'text-align:center; padding:22px' },
+      h('b', {}, `👀 ${S.name} さんは観戦中です`), h('div', { style: 'font-size:13px; opacity:.8; margin-top:4px' }, '次のラウンドから参加できます'))
+    : h('div', { class: `me ${myTurn && v.phase !== 'over' ? 'turn' : ''}`, 'data-seat': me },
       h('div', { class: 'mehead' },
         h('b', {}, `${S.name}（あなた）`), h('span', {}, `手札 ${v.hand.length}枚`), h('span', {}, `${totals[me] || 0} pt`),
         myTurn && v.unyoDeclared && h('span', { class: 'mark y' }, 'UNYO!')),
@@ -1269,6 +1371,7 @@ const CARD_INFO = [
   ['draw6', '次の人は6枚引きます。ドロー6以上を重ねられます。出した人が次の色を選びます。'],
   ['draw10', '次の人は10枚引きます。ドロー10を重ねられます。出した人が次の色を選びます。'],
   ['drawwild', '次の人は色を1つ宣言し、山札を1枚ずつめくります。宣言した色かレインボーが出たら、そのカードを場に出して番が終わります（そのカードの効果は発動しません）。ほかのドロー系カードは重ねられません。'],
+  ['drawasc', '出した人が次の色を選びます。そのあと次の人は数字（0〜9）を1つ宣言し、その数字のカードが出るまで山札から1枚ずつドローします。出たらそのカードを手札に加えて番が終わります。ほかのドロー系カードは重ねられません。'],
 ];
 function deckCounts(rules) {
   const m = {};
@@ -1305,6 +1408,11 @@ function renderRules(rules) {
       '手札が2枚で出せるカードがあるときは、出す前に画面左下の「UNYO!」ボタンを押します。',
       '宣言せずに出すと、ほかの人の画面に「UNYO忘れ！」ボタンが出ます。押されたら2枚引きます。',
       'だれも指摘しないまま次の人が行動したら、もう指摘できません。'),
+    rules.options.stackSame
+      ? sec('同じ数字の重ね出し（ON）',
+        '数字カードを出したとき、同じ数字のカードが手札にあれば、色に関係なく続けて重ねて出せます。',
+        '出し終わったら「出し終わる」ボタンを押します。0・3・7の効果は最後に1回だけ発動し、場の色は最後に出したカードの色になります。')
+      : sec('同じ数字の重ね出し（OFF）', 'このゲームでは、1ターンに出せるカードは1枚だけです。'),
     sec('ドロー系カードの重ね',
       'ドロー系カードを出されたら、直前に出たカードと同じ枚数か、それより多いドロー系カードを重ねられます。引く枚数は足し算されていきます。',
       '重ねられない・重ねないときは、合計の枚数を引いて番が終わります。',
@@ -1338,6 +1446,13 @@ function renderModal() {
       h('h2', {}, '次の色を選んでください'),
       h('div', { class: 'colors' }, COLORS.map(c =>
         h('button', { style: `background:${COLOR_HEX[c]}`, 'data-color': c, onclick: () => act({ t: 'color', color: c }) }, COLOR_JA[c])))));
+  }
+  if (v.phase === 'ascnum' && myTurn) {
+    return h('div', { class: 'overlay' }, h('div', { class: 'dialog' },
+      h('h2', {}, 'アセンダンス！数字を宣言してください'),
+      h('p', { style: 'margin:-6px 0 14px; font-size:13px; opacity:.85' }, '宣言した数字のカードが出るまで、山札からドローし続けます'),
+      h('div', { class: 'nums' }, Array.from({ length: 10 }, (_, n) =>
+        h('button', { class: 'btn', 'data-num': n, onclick: () => act({ t: 'ascnum', num: String(n) }) }, String(n))))));
   }
   if (v.phase === 'dwcolor' && myTurn) {
     return h('div', { class: 'overlay' }, h('div', { class: 'dialog' },
@@ -1391,7 +1506,7 @@ console.log('[UNYO] Version', VERSION);
 render();
 if (S.room) setTimeout(() => document.getElementById('code')?.focus(), 50);
 // テスト用フック
-window.__unyo = { S, H, act, connect };
+window.__unyo = { S, H, act, connect, broadcastState };
 </script>
 </body>
 </html>
