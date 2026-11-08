@@ -194,6 +194,14 @@ input:focus{border-color:var(--gold)}
 .rtoggle:not(.on){opacity:.55}
 .rtoggle:not(.on) .card{filter:grayscale(1)}
 .rtoggle:disabled{cursor:default}
+.rcount-row{cursor:default}
+.rgrid.wide{grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}
+.rgrid.wide .rl{white-space:nowrap}
+.stepper{display:flex; align-items:center; gap:4px}
+.stp{width:24px; height:24px; border-radius:50%; border:none; background:#fff; color:var(--ink); font-weight:800; font-size:15px; line-height:1; cursor:pointer; padding:0}
+.stp:disabled{opacity:.3; cursor:default}
+.stn{min-width:32px; text-align:center; font-size:12px; padding:1px 6px; border-radius:99px; background:rgba(255,255,255,.15)}
+.rcount-row.on .stn{background:var(--gold); color:var(--ink)}
 .debugbar{background:rgba(255,122,162,.18); color:#ffd0de; font-size:12px; text-align:center; padding:3px}
 @media (max-width:600px){
   .card{--w:54px} .card.lg{--w:76px} .card.sm{--w:28px}
@@ -228,34 +236,43 @@ function shuffle(a) {
   }
   return a;
 }
-// ルールのカスタマイズ：数字以外のカードは ON/OFF、数字カードは特殊効果の ON/OFF
-const OPTIONAL_CARDS = ['skip', 'reverse', 'draw2', 'discard', 'wild', 'draw4', 'draw6', 'draw10', 'drawwild'];
+// ルールのカスタマイズ：色つき特殊カードは ON/OFF、レインボーカードは枚数(0〜10)、数字カードは特殊効果の ON/OFF
+const COLOR_OPTIONAL = ['skip', 'reverse', 'draw2', 'discard'];
+const RAINBOW_CARDS = ['wild', 'draw4', 'draw6', 'draw10', 'drawwild'];
+const RAINBOW_DEFAULT = { wild: 2, draw4: 2, draw6: 4, draw10: 2, drawwild: 2 };
+const RAINBOW_MAX = 10;
+const OPTIONAL_CARDS = [...COLOR_OPTIONAL, ...RAINBOW_CARDS];
 const EFFECT_NUMS = ['0', '3', '7'];
 function defaultRules() {
   return {
-    cards: Object.fromEntries(OPTIONAL_CARDS.map(k => [k, true])),
+    cards: Object.fromEntries(COLOR_OPTIONAL.map(k => [k, true])),
+    counts: { ...RAINBOW_DEFAULT },
     effects: Object.fromEntries(EFFECT_NUMS.map(k => [k, true])),
   };
 }
 function normRules(r) {
   const d = defaultRules();
   if (r && typeof r === 'object') {
-    for (const k of OPTIONAL_CARDS) if (r.cards && typeof r.cards[k] === 'boolean') d.cards[k] = r.cards[k];
+    for (const k of COLOR_OPTIONAL) if (r.cards && typeof r.cards[k] === 'boolean') d.cards[k] = r.cards[k];
+    for (const k of RAINBOW_CARDS) {
+      const n = r.counts && Number(r.counts[k]);
+      if (Number.isFinite(n)) d.counts[k] = Math.max(0, Math.min(RAINBOW_MAX, Math.round(n)));
+      else if (r.cards && r.cards[k] === false) d.counts[k] = 0; // 旧バージョンの設定(ON/OFF)
+    }
     for (const k of EFFECT_NUMS) if (r.effects && typeof r.effects[k] === 'boolean') d.effects[k] = r.effects[k];
   }
   return d;
 }
 function buildDeck(rules = defaultRules()) {
+  rules = normRules(rules);
   const d = []; let id = 0;
   const add = (color, sym) => d.push({ id: id++, color, sym });
-  const on = sym => rules.cards[sym] !== false;
   for (const c of COLORS) {
     for (let n = 0; n <= 9; n++) { add(c, String(n)); add(c, String(n)); } // 0〜9 各2枚（常に入る）
-    for (const s of ['skip', 'reverse', 'draw2', 'discard']) if (on(s)) { add(c, s); add(c, s); } // 各色2枚
+    for (const s of COLOR_OPTIONAL) if (rules.cards[s]) { add(c, s); add(c, s); } // 各色2枚
   }
-  const rb = (sym, n) => { if (on(sym)) for (let i = 0; i < n; i++) add('rainbow', sym); };
-  rb('draw4', 2); rb('wild', 2); rb('draw6', 4); rb('draw10', 2); rb('drawwild', 2); // レインボー
-  return d; // すべてONで 124枚
+  for (const sym of RAINBOW_CARDS) for (let i = 0; i < rules.counts[sym]; i++) add('rainbow', sym); // レインボー
+  return d; // 初期設定で 124枚
 }
 
 class Game {
@@ -618,7 +635,7 @@ class Game {
 // =====================================================================
 
 // バージョン表記 AA.BB（AA=メイン, 開発中は00 / BB=ミニ, 更新ごとに+1）
-const VERSION = '00.08';
+const VERSION = '00.09';
 const APP_ID = 'unyo-card-game-p2p-v1';
 const TRYSTERO_URLS = {
   nostr: [
@@ -1049,7 +1066,18 @@ function rulesEditor(rules, editable) {
       h('span', { style: 'font-size:12px; opacity:.8' }, `山札 ${deckSize} 枚`)),
     !editable && h('div', { class: 'note', style: 'margin:0 0 6px' }, 'ホストが設定します（見るだけ）'),
     h('div', { class: 'rhead' }, '使うカード（数字カード 0〜9 は常に入ります）'),
-    h('div', { class: 'rgrid' }, OPTIONAL_CARDS.map(k => tog('cards', k, SYM_JA[k], sampleCard(k), 'ON', 'OFF'))),
+    h('div', { class: 'rgrid' }, COLOR_OPTIONAL.map(k => tog('cards', k, SYM_JA[k], sampleCard(k), 'ON', 'OFF'))),
+    h('div', { class: 'rhead' }, `レインボーカードの枚数（0〜${RAINBOW_MAX}枚）`),
+    h('div', { class: 'rgrid wide' }, RAINBOW_CARDS.map(k => {
+      const n = rules.counts[k];
+      const step = d => setRule('counts', k, Math.max(0, Math.min(RAINBOW_MAX, n + d)));
+      return h('div', { class: `rtoggle rcount-row ${n > 0 ? 'on' : ''}`, 'data-count': k },
+        sampleCard(k), h('span', { class: 'rl' }, SYM_JA[k]),
+        h('span', { class: 'stepper' },
+          editable && h('button', { class: 'stp', 'data-step': `${k}-minus`, disabled: n <= 0, onclick: () => step(-1) }, '−'),
+          h('span', { class: 'stn', 'data-num': k }, `${n}枚`),
+          editable && h('button', { class: 'stp', 'data-step': `${k}-plus`, disabled: n >= RAINBOW_MAX, onclick: () => step(1) }, '+')));
+    })),
     h('div', { class: 'rhead' }, '数字カードの特殊効果'),
     h('div', { class: 'rgrid' }, EFFECT_NUMS.map(k => tog('effects', k, `${k}：${EFFECT_SHORT[k]}`, sampleCard(k), '効果ON', '効果OFF'))),
     h('div', { class: 'row', style: 'justify-content:space-between; margin-top:8px' },
@@ -1294,8 +1322,8 @@ function renderRules(rules) {
           h('td', {}, sample(sym)),
           h('td', {}, h('b', {}, SYM_JA[sym] ?? sym), h('div', { class: 'rcount' }, countText(sym))),
           h('td', {}, EFFECT_NUMS.includes(sym) && !rules.effects[sym] ? '効果なし（このゲームでは特殊効果OFF）' : desc)))),
-      OPTIONAL_CARDS.some(k => !rules.cards[k]) && h('p', { style: 'font-size:12px; opacity:.75' },
-        'このゲームで使わないカード：', OPTIONAL_CARDS.filter(k => !rules.cards[k]).map(k => SYM_JA[k]).join('、'))));
+      OPTIONAL_CARDS.some(k => !cnt[k]) && h('p', { style: 'font-size:12px; opacity:.75' },
+        'このゲームで使わないカード：', OPTIONAL_CARDS.filter(k => !cnt[k]).map(k => SYM_JA[k]).join('、'))));
 }
 
 function renderModal() {
