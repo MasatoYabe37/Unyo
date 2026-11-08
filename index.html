@@ -101,7 +101,9 @@ input:focus{border-color:var(--gold)}
 .me{background:rgba(0,0,0,.3); border-top:1px solid rgba(255,255,255,.12); padding:10px 12px 16px}
 .me.turn{box-shadow:inset 0 3px 0 var(--gold)}
 .actions{display:flex; justify-content:center; gap:10px; flex-wrap:wrap; min-height:46px; align-items:center}
-.mehead{display:flex; justify-content:center; gap:10px; align-items:center; font-size:13px; margin-bottom:4px; opacity:.9}
+.sorts{display:inline-flex; gap:4px; align-items:center; margin-left:6px}
+.sorts .btn{padding:3px 10px; font-size:12px}
+.mehead{display:flex; flex-wrap:wrap; justify-content:center; gap:10px; align-items:center; font-size:13px; margin-bottom:4px; opacity:.9}
 .hand{display:flex; flex-wrap:wrap; justify-content:center; gap:6px; padding-top:16px}
 
 /* ===== Cards (UNYOオリジナルデザイン) ===== */
@@ -145,6 +147,9 @@ input:focus{border-color:var(--gold)}
 .card.sm2{--w:48px}
 .card.sm2 .cn{display:none}
 .three-hand .card{cursor:pointer}
+.four-hand .card.pick{cursor:pointer; transition:transform .12s}
+.four-hand .card.pick:hover{transform:translateY(-10px); box-shadow:0 0 0 3px #fff8, 0 0 16px 4px var(--gold)}
+.card.sm2 .backlogo{font-size:9px}
 .unyo-zone{position:fixed; left:12px; bottom:28px; z-index:45; display:flex; flex-direction:column; gap:10px; align-items:flex-start}
 .fly{position:fixed; left:0; top:0; z-index:80; pointer-events:none; margin:0 !important; --w:54px}
 .cutin{position:fixed; inset:0; z-index:85; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; pointer-events:none;
@@ -240,16 +245,22 @@ function shuffle(a) {
   return a;
 }
 // ルールのカスタマイズ：色つき特殊カードは ON/OFF、レインボーカードは枚数(0〜10)、数字カードは特殊効果の ON/OFF
+const NUM_SYMS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
 const COLOR_OPTIONAL = ['skip', 'reverse', 'draw2', 'discard'];
+const COLOR_CARDS = [...NUM_SYMS, ...COLOR_OPTIONAL];   // 4色のカード（枚数は「1色あたり」）
 const RAINBOW_CARDS = ['wild', 'draw4', 'draw6', 'draw10', 'drawwild', 'drawasc'];
 const RAINBOW_DEFAULT = { wild: 2, draw4: 2, draw6: 4, draw10: 2, drawwild: 2, drawasc: 2 };
-const RAINBOW_MAX = 10;
+const RAINBOW_MAX = 10, COLOR_MAX = 10;
 const OPTIONAL_CARDS = [...COLOR_OPTIONAL, ...RAINBOW_CARDS];
-const EFFECT_NUMS = ['0', '3', '7'];
+const EFFECT_NUMS = ['0', '3', '4', '7'];
+function countRange(sym) {
+  if (NUM_SYMS.includes(sym)) return [1, COLOR_MAX];   // 数字カードは0枚にできない
+  if (COLOR_OPTIONAL.includes(sym)) return [0, COLOR_MAX];
+  return [0, RAINBOW_MAX];
+}
 function defaultRules() {
   return {
-    cards: Object.fromEntries(COLOR_OPTIONAL.map(k => [k, true])),
-    counts: { ...RAINBOW_DEFAULT },
+    counts: { ...Object.fromEntries(COLOR_CARDS.map(k => [k, 2])), ...RAINBOW_DEFAULT }, // 色つきは1色あたりの枚数
     effects: Object.fromEntries(EFFECT_NUMS.map(k => [k, true])),
     options: { stackSame: true }, // 同じ数字の重ね出し
   };
@@ -257,10 +268,10 @@ function defaultRules() {
 function normRules(r) {
   const d = defaultRules();
   if (r && typeof r === 'object') {
-    for (const k of COLOR_OPTIONAL) if (r.cards && typeof r.cards[k] === 'boolean') d.cards[k] = r.cards[k];
-    for (const k of RAINBOW_CARDS) {
+    for (const k of [...COLOR_CARDS, ...RAINBOW_CARDS]) {
+      const [lo, hi] = countRange(k);
       const n = r.counts && Number(r.counts[k]);
-      if (Number.isFinite(n)) d.counts[k] = Math.max(0, Math.min(RAINBOW_MAX, Math.round(n)));
+      if (r.counts && r.counts[k] != null && Number.isFinite(n)) d.counts[k] = Math.max(lo, Math.min(hi, Math.round(n)));
       else if (r.cards && r.cards[k] === false) d.counts[k] = 0; // 旧バージョンの設定(ON/OFF)
     }
     for (const k of EFFECT_NUMS) if (r.effects && typeof r.effects[k] === 'boolean') d.effects[k] = r.effects[k];
@@ -272,12 +283,9 @@ function buildDeck(rules = defaultRules()) {
   rules = normRules(rules);
   const d = []; let id = 0;
   const add = (color, sym) => d.push({ id: id++, color, sym });
-  for (const c of COLORS) {
-    for (let n = 0; n <= 9; n++) { add(c, String(n)); add(c, String(n)); } // 0〜9 各2枚（常に入る）
-    for (const s of COLOR_OPTIONAL) if (rules.cards[s]) { add(c, s); add(c, s); } // 各色2枚
-  }
+  for (const c of COLORS) for (const sym of COLOR_CARDS) for (let i = 0; i < rules.counts[sym]; i++) add(c, sym); // 4色×X枚
   for (const sym of RAINBOW_CARDS) for (let i = 0; i < rules.counts[sym]; i++) add('rainbow', sym); // レインボー
-  return d; // 初期設定で 124枚
+  return d; // 初期設定で 126枚
 }
 
 class Game {
@@ -312,6 +320,7 @@ class Game {
     this.asc = null;           // アセンダンス進行中 {by, num, count}
     this.ascNext = false;      // 色選択のあとアセンダンスに入るか
     this.chainSym = null; this.chainCount = 0; // 同じ数字の重ね出し
+    this.fourTarget = null; this.fourPerm = []; // 4：捨てさせる相手
     this.phase = 'play';       // play | color | seven | three | dwcolor | dwdraw | over
     this.forced = null;        // パスで引いたカードが出せる場合、そのカードID
     this.unyoDeclared = false; // 現在の手番プレイヤーがUNYO宣言済みか
@@ -429,12 +438,14 @@ class Game {
     if (this.phase === 'over') return;
     if (this.unyoTarget === pid) this.unyoTarget = null;
     if (this.activeCount() < 2) { this.endShort(); return; }
+    if (this.phase === 'four' && this.fourTarget === pid) { this.fourTarget = null; this.advance(1); return; }
     if (this.cur().id === pid) {
       if (this.phase === 'color') {
         this.ascNext = false;
         this.color = COLORS[Math.floor(Math.random() * 4)];
         this.addLog(`色はランダムで「${COLOR_JA[this.color]}」になりました`);
-      } else if (this.phase === 'ascnum' || this.phase === 'ascdraw' || this.phase === 'chain') {
+      } else if (this.phase === 'ascnum' || this.phase === 'ascdraw' || this.phase === 'chain' || this.phase === 'four') {
+        this.fourTarget = null;
         this.asc = null; this.chainSym = null; this.chainCount = 0;
       } else if (this.phase === 'dwcolor' || this.phase === 'dwdraw') {
         this.color = (this.dw && this.dw.color) || COLORS[Math.floor(Math.random() * 4)];
@@ -457,6 +468,14 @@ class Game {
     if (eff && c.sym === '7' && others.length) { this.phase = 'seven'; return null; }
     if (eff && c.sym === '3' && others.length) { this.phase = 'three'; return null; }
     if (eff && c.sym === '0') this.rotateHands();
+    if (eff && c.sym === '4') {
+      const t = this.players[this.nextIdx(this.turn, 1)];
+      if (t && t.id !== p.id && t.hand.length > 0) {
+        this.phase = 'four'; this.fourTarget = t.id;
+        this.fourPerm = shuffle(t.hand.map((_, i) => i)); // 裏向きで選ぶ順番はシャッフル
+        return null;
+      }
+    }
     this.advance(1);
     return null;
   }
@@ -567,6 +586,25 @@ class Game {
           default:
             this.advance(1);
         }
+        return null;
+      }
+      case 'four': {
+        if (!isCur || this.phase !== 'four') return '捨てるカードを選ぶタイミングではありません';
+        const t = this.byId(this.fourTarget);
+        this.fourTarget = null;
+        if (!t || !this.isActive(t) || a.idx === -1 || a.idx == null) {
+          this.addLog(`${p.name} さんはカードを捨てさせませんでした`);
+          this.advance(1); return null;
+        }
+        if (this.fourPerm.length !== t.hand.length) this.fourPerm = shuffle(t.hand.map((_, i) => i));
+        const idx = Number(a.idx);
+        if (!(idx >= 0 && idx < this.fourPerm.length)) { this.fourTarget = t.id; return 'カードを選んでください'; }
+        const [c] = t.hand.splice(this.fourPerm[idx], 1);
+        this.discard.splice(this.discard.length - 1, 0, c); // 場の一番上(4)の下に置く
+        this.emit('four', { by: pid, from: t.id, card: c });
+        this.addLog(`${p.name} さんが ${t.name} さんの手札から「${cardName(c)}」を捨てさせました`, true);
+        if (t.hand.length === 0) { this.finish(t, '最後の1枚を捨てられて手札が無くなったため'); return null; }
+        this.advance(1);
         return null;
       }
       case 'chainend': {
@@ -694,6 +732,7 @@ class Game {
       winner: this.winner, roundScore: this.roundScore, totals: { ...this.totals },
       voided: this.voided, endReason: this.endReason,
       asc: this.asc ? { ...this.asc } : null, chainSym: this.chainSym, chainCount: this.chainCount,
+      fourTarget: this.fourTarget || null,
       playable: !myTurn ? [] : this.phase === 'chain'
         ? me.hand.filter(c => c.sym === this.chainSym).map(c => c.id)
         : me.hand.filter(c => this.canPlay(c) && (this.forced === null || c.id === this.forced)).map(c => c.id),
@@ -704,7 +743,7 @@ class Game {
 // =====================================================================
 
 // バージョン表記 AA.BB（AA=メイン, 開発中は00 / BB=ミニ, 更新ごとに+1）
-const VERSION = '00.12';
+const VERSION = '00.13';
 const APP_ID = 'unyo-card-game-p2p-v1';
 const TRYSTERO_URLS = {
   nostr: [
@@ -803,6 +842,7 @@ const S = {
   net: params.get('net') === 'torrent' ? 'torrent' : 'nostr',
   diag: { lib: '', relays: '', joinErr: '', peers: 0, since: 0 },
   seenE: null, fxQueue: [], fxBusyUntil: 0, threeCard: null, showRules: false,
+  sortMode: ['draw', 'color', 'number'].includes(store.get('unyo-sort')) ? store.get('unyo-sort') : 'draw',
   debug: false, showLog: false, status: '', error: '', hostLost: false, seenSeq: 0, seenRound: 0, A: null,
 };
 const H = { players: [], game: null, totals: {}, round: 1, rules: null }; // ホスト専用
@@ -954,8 +994,8 @@ function setView(v) {
 }
 
 // ---------- 演出 ----------
-const FX_SYMS = new Set(['0', '3', '7', 'discard', 'skip', 'reverse', 'draw2', 'draw4', 'draw6', 'draw10', 'wild', 'drawwild', 'drawasc']);
-const FX_LABEL = { '0': '手札まわし！', '3': 'カードを渡す！', discard: 'ディスカード！', '7': '手札交換！', skip: 'スキップ！', reverse: 'リバース！', wild: 'ワイルド！', drawwild: 'ドローワイルド！', drawasc: 'アセンダンス！' };
+const FX_SYMS = new Set(['0', '3', '4', '7', 'discard', 'skip', 'reverse', 'draw2', 'draw4', 'draw6', 'draw10', 'wild', 'drawwild', 'drawasc']);
+const FX_LABEL = { '0': '手札まわし！', '3': 'カードを渡す！', '4': '手札を捨てさせる！', discard: 'ディスカード！', '7': '手札交換！', skip: 'スキップ！', reverse: 'リバース！', wild: 'ワイルド！', drawwild: 'ドローワイルド！', drawasc: 'アセンダンス！' };
 function fxLabel(e) {
   const dv = DRAW_VAL[e.card.sym];
   if (dv) return [`ドロー${dv}！`, e.pending > dv ? `重ねて合計 +${e.pending}` : ''];
@@ -972,6 +1012,13 @@ function playFx(list) {
       const [a, b] = fxLabel(e);
       at(t, () => cutin(e.card, a, (S.view ? playerName(S.view, e.by) + ' さん' : '') + (b ? '　' + b : '')));
       t += 950;
+    } else if (e.type === 'four') {
+      at(t, () => {
+        const f = seatRect(e.from), to = document.getElementById('discard')?.getBoundingClientRect();
+        fly(f, to, { rot: 0, s0: .7, s1: 1, dur: 600 });
+        setTimeout(() => cutin(e.card, '捨てさせた！', `${S.view ? playerName(S.view, e.from) : ''} さんの手札から`), 550);
+      });
+      t += 1550;
     } else if (e.type === 'aschit') {
       at(t, () => cutin(e.card, 'ヒット！', `${S.view ? playerName(S.view, e.pid) : ''} さん ${e.count} 枚目（手札へ）`));
       t += 950;
@@ -1127,7 +1174,7 @@ function renderLobby() {
         h('br'), '接続には数秒〜数十秒かかることがあります。')));
 }
 
-const EFFECT_SHORT = { '0': '手札まわし', '3': '1枚渡す', '7': '手札交換' };
+const EFFECT_SHORT = { '0': '手札まわし', '3': '1枚渡す', '4': '1枚捨てさせる', '7': '手札交換' };
 function setRule(group, key, val) {
   H.rules = normRules(H.rules);
   H.rules[group][key] = val;
@@ -1143,28 +1190,32 @@ function rulesEditor(rules, editable) {
       sample, h('span', { class: 'rl' }, label), h('span', { class: 'sw' }, on ? onTxt : offTxt));
   };
   const sampleCard = sym => cardEl({ id: -1, color: RAINBOW_CARDS.includes(sym) ? 'rainbow' : 'blue', sym }, { size: 'sm' });
+  const stepRow = k => {
+    const n = rules.counts[k], [lo, hi] = countRange(k);
+    const colored = !RAINBOW_CARDS.includes(k);
+    const step = d => setRule('counts', k, Math.max(lo, Math.min(hi, n + d)));
+    return h('div', { class: `rtoggle rcount-row ${n > 0 ? 'on' : ''}`, 'data-count': k },
+      sampleCard(k), h('span', { class: 'rl' }, NUM_SYMS.includes(k) ? `数字 ${k}` : SYM_JA[k]),
+      h('span', { class: 'stepper' },
+        editable && h('button', { class: 'stp', 'data-step': `${k}-minus`, disabled: n <= lo, onclick: () => step(-1) }, '−'),
+        h('span', { class: 'stn', 'data-num': k }, colored ? `4色×${n}` : `${n}枚`),
+        editable && h('button', { class: 'stp', 'data-step': `${k}-plus`, disabled: n >= hi, onclick: () => step(1) }, '+')));
+  };
   return h('div', { class: 'reditor', id: 'rule-editor' },
     h('div', { class: 'row', style: 'justify-content:space-between; margin-bottom:6px' },
       h('b', {}, 'ルール設定'),
       h('span', { style: 'font-size:12px; opacity:.8' }, `山札 ${deckSize} 枚`)),
     !editable && h('div', { class: 'note', style: 'margin:0 0 6px' }, 'ホストが設定します（見るだけ）'),
-    h('div', { class: 'rhead' }, '使うカード（数字カード 0〜9 は常に入ります）'),
-    h('div', { class: 'rgrid' }, COLOR_OPTIONAL.map(k => tog('cards', k, SYM_JA[k], sampleCard(k), 'ON', 'OFF'))),
+    h('div', { class: 'rhead' }, `数字カードの枚数（4色 × 1〜${COLOR_MAX}枚）`),
+    h('div', { class: 'rgrid wide' }, NUM_SYMS.map(k => stepRow(k))),
+    h('div', { class: 'rhead' }, `色つき特殊カードの枚数（4色 × 0〜${COLOR_MAX}枚、0でOFF）`),
+    h('div', { class: 'rgrid wide' }, COLOR_OPTIONAL.map(k => stepRow(k))),
     h('div', { class: 'rhead' }, `レインボーカードの枚数（0〜${RAINBOW_MAX}枚）`),
-    h('div', { class: 'rgrid wide' }, RAINBOW_CARDS.map(k => {
-      const n = rules.counts[k];
-      const step = d => setRule('counts', k, Math.max(0, Math.min(RAINBOW_MAX, n + d)));
-      return h('div', { class: `rtoggle rcount-row ${n > 0 ? 'on' : ''}`, 'data-count': k },
-        sampleCard(k), h('span', { class: 'rl' }, SYM_JA[k]),
-        h('span', { class: 'stepper' },
-          editable && h('button', { class: 'stp', 'data-step': `${k}-minus`, disabled: n <= 0, onclick: () => step(-1) }, '−'),
-          h('span', { class: 'stn', 'data-num': k }, `${n}枚`),
-          editable && h('button', { class: 'stp', 'data-step': `${k}-plus`, disabled: n >= RAINBOW_MAX, onclick: () => step(1) }, '+')));
-    })),
+    h('div', { class: 'rgrid wide' }, RAINBOW_CARDS.map(k => stepRow(k))),
     h('div', { class: 'rhead' }, '追加ルール'),
     h('div', { class: 'rgrid wide' }, tog('options', 'stackSame', '同じ数字の重ね出し', sampleCard('5'), 'ON', 'OFF')),
     h('div', { class: 'rhead' }, '数字カードの特殊効果'),
-    h('div', { class: 'rgrid' }, EFFECT_NUMS.map(k => tog('effects', k, `${k}：${EFFECT_SHORT[k]}`, sampleCard(k), '効果ON', '効果OFF'))),
+    h('div', { class: 'rgrid wide' }, EFFECT_NUMS.map(k => tog('effects', k, `${k}：${EFFECT_SHORT[k]}`, sampleCard(k), '効果ON', '効果OFF'))),
     h('div', { class: 'row', style: 'justify-content:space-between; margin-top:8px' },
       h('button', { class: 'btn small ghost', id: 'btn-rules-room', onclick: () => { S.showRules = !S.showRules; render(); } }, 'ルール詳細を見る'),
       editable && h('button', { class: 'btn small ghost', id: 'btn-rules-reset', onclick: () => {
@@ -1244,6 +1295,7 @@ function renderGame() {
   else if (!meP) status = `👀 観戦中（${curName} さんの番）`;
   else if (meP && meP.burst) status = `💥 バーストしました。このラウンドは観戦です（${curName} さんの番）`;
   else if (v.phase === 'color') status = myTurn ? '色を選んでください' : `${curName} さんが色を選んでいます…`;
+  else if (v.phase === 'four') status = myTurn ? `4：${playerName(v, v.fourTarget)} さんの手札から捨てさせるカードを選んでください` : `${curName} さんが ${playerName(v, v.fourTarget)} さんの手札から捨てさせるカードを選んでいます…`;
   else if (v.phase === 'chain') status = myTurn ? `同じ数字「${v.chainSym}」を続けて出せます。出し終わったら「出し終わる」を押してください` : `${curName} さんが「${v.chainSym}」を重ねて出しています…`;
   else if (v.phase === 'ascnum') status = myTurn ? 'アセンダンス！宣言する数字を選んでください' : `${curName} さんが数字を宣言しています…（アセンダンス）`;
   else if (v.phase === 'ascdraw') status = myTurn
@@ -1278,7 +1330,7 @@ function renderGame() {
       h('div', { class: 'fan' }, cards, !S.debug && p.count > 14 && h('span', { class: 'more' }, `+${p.count - 14}`)));
   };
 
-  const myCards = v.hand.map(c => {
+  const myCards = sortHand(v.hand).map(c => {
     const ok = playable.has(c.id);
     return cardEl(c, {
       playable: ok, forced: v.forced === c.id,
@@ -1344,6 +1396,9 @@ function renderGame() {
     : h('div', { class: `me ${myTurn && v.phase !== 'over' ? 'turn' : ''}`, 'data-seat': me },
       h('div', { class: 'mehead' },
         h('b', {}, `${S.name}（あなた）`), h('span', {}, `手札 ${v.hand.length}枚`), h('span', {}, `${totals[me] || 0} pt`),
+        h('span', { class: 'sorts' }, '並び：', SORT_MODES.map(([k, label]) =>
+          h('button', { class: `btn small ${S.sortMode === k ? 'primary' : 'ghost'}`, 'data-sort': k,
+            onclick: () => { S.sortMode = k; store.set('unyo-sort', k); render(); } }, label))),
         myTurn && v.unyoDeclared && h('span', { class: 'mark y' }, 'UNYO!')),
       h('div', { class: 'actions' }, actions),
       h('div', { class: 'hand', id: 'hand' }, myCards)),
@@ -1354,12 +1409,23 @@ function renderGame() {
     S.showRules && renderRules(v.rules));
 }
 
+// ---------- 手札の並べ替え ----------
+const SORT_MODES = [['draw', '引いた順'], ['color', '色順'], ['number', '数字順']];
+const COLOR_ORDER = { red: 0, blue: 1, yellow: 2, green: 3, rainbow: 4 };
+const SYM_ORDER = Object.fromEntries([...NUM_SYMS, ...COLOR_OPTIONAL, ...RAINBOW_CARDS].map((k, i) => [k, i]));
+function sortHand(hand) {
+  const a = hand.slice(); // サーバーの順番 = 手札に加わった順
+  if (S.sortMode === 'color') a.sort((x, y) => COLOR_ORDER[x.color] - COLOR_ORDER[y.color] || SYM_ORDER[x.sym] - SYM_ORDER[y.sym]);
+  else if (S.sortMode === 'number') a.sort((x, y) => SYM_ORDER[x.sym] - SYM_ORDER[y.sym] || COLOR_ORDER[x.color] - COLOR_ORDER[y.color]);
+  return a;
+}
+
 // ---------- ルール説明パネル ----------
 const CARD_INFO = [
   ['0', '全員が、次の順番の人へ手札をまるごと渡します。'],
   ['1', '効果なし'], ['2', '効果なし'],
   ['3', '好きな相手を1人選び、自分の手札から好きなカードを1枚渡します（自分は選べません）。'],
-  ['4', '効果なし'], ['5', '効果なし'], ['6', '効果なし'],
+  ['4', '次の人の手札を、裏向きのまま（シャッフルされた状態で）1枚選んで捨てさせることができます。捨てさせないこともできます。最後の1枚を捨てさせた場合は、その人の手札が無くなるのでその人の勝ちになります。'], ['5', '効果なし'], ['6', '効果なし'],
   ['7', '相手を1人指名して、その人とすぐに手札を交換します（自分は選べません）。'],
   ['8', '効果なし'], ['9', '効果なし'],
   ['skip', '次の人の番を飛ばします。'],
@@ -1447,6 +1513,20 @@ function renderModal() {
       h('div', { class: 'colors' }, COLORS.map(c =>
         h('button', { style: `background:${COLOR_HEX[c]}`, 'data-color': c, onclick: () => act({ t: 'color', color: c }) }, COLOR_JA[c])))));
   }
+  if (v.phase === 'four' && myTurn) {
+    const tp = v.players.find(p => p.id === v.fourTarget);
+    const n = tp ? tp.count : 0;
+    return h('div', { class: 'overlay' }, h('div', { class: 'dialog', style: 'width:min(620px,100%)' },
+      h('h2', {}, `4：${tp ? tp.name : ''} さんの手札を1枚捨てさせる`),
+      h('p', { style: 'margin:-6px 0 12px; font-size:13px; opacity:.85' }, '手札はシャッフルされています。裏向きのまま1枚選んでください'),
+      h('div', { class: 'hand four-hand', style: 'padding-top:14px; margin-bottom:14px' },
+        Array.from({ length: n }, (_, i) => {
+          const b = backEl('sm2'); b.classList.add('pick'); b.setAttribute('data-idx', i);
+          b.addEventListener('click', () => act({ t: 'four', idx: i }));
+          return b;
+        })),
+      h('button', { class: 'btn ghost', id: 'btn-four-skip', onclick: () => act({ t: 'four', idx: -1 }) }, '捨てさせない')));
+  }
   if (v.phase === 'ascnum' && myTurn) {
     return h('div', { class: 'overlay' }, h('div', { class: 'dialog' },
       h('h2', {}, 'アセンダンス！数字を宣言してください'),
@@ -1466,7 +1546,7 @@ function renderModal() {
     if (!v.hand.some(c => c.id === S.threeCard)) S.threeCard = null;
     return h('div', { class: 'overlay' }, h('div', { class: 'dialog', style: 'width:min(620px,100%)' },
       h('h2', {}, '3：相手に渡すカードを1枚選んでください'),
-      h('div', { class: 'hand three-hand', style: 'padding-top:16px; margin-bottom:14px' }, v.hand.map(c =>
+      h('div', { class: 'hand three-hand', style: 'padding-top:16px; margin-bottom:14px' }, sortHand(v.hand).map(c =>
         cardEl(c, { size: 'sm2', playable: S.threeCard === c.id, dim: S.threeCard !== null && S.threeCard !== c.id,
           onclick: () => { S.threeCard = c.id; render(); } }))),
       h('h2', { style: 'font-size:16px' }, '渡す相手'),
