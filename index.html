@@ -655,7 +655,7 @@ class Game {
         if (!isCur || this.phase !== 'dwcolor') return '色を宣言するタイミングではありません';
         if (!COLORS.includes(a.color)) return '不正な色です';
         this.dw.color = a.color; this.phase = 'dwdraw';
-        this.addLog(`${p.name} さんは「${COLOR_JA[a.color]}」を宣言！ その色かレインボーが出るまでめくります`, true);
+        this.addLog(`${p.name} さんは「${COLOR_JA[a.color]}」を宣言！ その色が出るまでめくります（レインボーははずれ）`, true);
         return null;
       }
       case 'dwdraw': {
@@ -663,7 +663,7 @@ class Game {
         const [c] = this.drawCards(p, 1);
         if (!c) return null; // 山札切れ → 無効試合
         this.dw.count++;
-        if (c.color === this.dw.color || c.color === 'rainbow') {
+        if (c.color === this.dw.color) { // レインボーは宣言した色とみなさない
           p.hand.splice(p.hand.indexOf(c), 1); this.discard.push(c);
           this.color = this.dw.color;
           this.addLog(`${p.name} さんは ${this.dw.count} 枚目で「${cardName(c)}」を引き当て、場に出しました`, true);
@@ -704,7 +704,7 @@ class Game {
 // =====================================================================
 
 // バージョン表記 AA.BB（AA=メイン, 開発中は00 / BB=ミニ, 更新ごとに+1）
-const VERSION = '00.11';
+const VERSION = '00.12';
 const APP_ID = 'unyo-card-game-p2p-v1';
 const TRYSTERO_URLS = {
   nostr: [
@@ -1251,7 +1251,7 @@ function renderGame() {
     : `${curName} さんが「${v.asc.num}」が出るまでドローしています…（${v.asc.count}枚目）`;
   else if (v.phase === 'dwcolor') status = myTurn ? 'ドローワイルド！宣言する色を選んでください' : `${curName} さんが色を宣言しています…（ドローワイルド）`;
   else if (v.phase === 'dwdraw') status = myTurn
-    ? `「${COLOR_JA[v.dw.color]}」かレインボーが出るまで、山札をめくってください（${v.dw.count}枚めくり済み）`
+    ? `「${COLOR_JA[v.dw.color]}」のカードが出るまで、山札をめくってください（レインボーははずれ／${v.dw.count}枚めくり済み）`
     : `${curName} さんが「${COLOR_JA[v.dw.color]}」が出るまでめくっています…（${v.dw.count}枚目）`;
   else if (v.phase === 'three') status = myTurn ? '3：渡すカードと、渡す相手を選んでください' : `${curName} さんがカードを渡す相手を選んでいます…`;
   else if (v.phase === 'seven') status = myTurn ? '手札を交換する相手を選んでください' : `${curName} さんが交換相手を選んでいます…`;
@@ -1370,7 +1370,7 @@ const CARD_INFO = [
   ['draw4', '次の人は4枚引きます。ドロー4以上を重ねられます。出した人が次の色を選びます。'],
   ['draw6', '次の人は6枚引きます。ドロー6以上を重ねられます。出した人が次の色を選びます。'],
   ['draw10', '次の人は10枚引きます。ドロー10を重ねられます。出した人が次の色を選びます。'],
-  ['drawwild', '次の人は色を1つ宣言し、山札を1枚ずつめくります。宣言した色かレインボーが出たら、そのカードを場に出して番が終わります（そのカードの効果は発動しません）。ほかのドロー系カードは重ねられません。'],
+  ['drawwild', '次の人は色を1つ宣言し、山札を1枚ずつめくります。宣言した色のカードが出たら、そのカードを場に出して番が終わります（そのカードの効果は発動しません）。レインボーのカードは宣言した色とはみなされず、はずれになります。ほかのドロー系カードは重ねられません。'],
   ['drawasc', '出した人が次の色を選びます。そのあと次の人は数字（0〜9）を1つ宣言し、その数字のカードが出るまで山札から1枚ずつドローします。出たらそのカードを手札に加えて番が終わります。ほかのドロー系カードは重ねられません。'],
 ];
 function deckCounts(rules) {
@@ -1457,7 +1457,7 @@ function renderModal() {
   if (v.phase === 'dwcolor' && myTurn) {
     return h('div', { class: 'overlay' }, h('div', { class: 'dialog' },
       h('h2', {}, 'ドローワイルド！色を宣言してください'),
-      h('p', { style: 'margin:-6px 0 14px; font-size:13px; opacity:.85' }, '宣言した色かレインボーが出るまで、山札をめくり続けます'),
+      h('p', { style: 'margin:-6px 0 14px; font-size:13px; opacity:.85' }, '宣言した色のカードが出るまで、山札をめくり続けます（レインボーははずれ）'),
       h('div', { class: 'colors' }, COLORS.map(c =>
         h('button', { style: `background:${COLOR_HEX[c]}`, 'data-color': c, onclick: () => act({ t: 'dwcolor', color: c }) }, COLOR_JA[c])))));
   }
